@@ -387,17 +387,25 @@ def flash_firmware(dfu: str, fw: Path, label: str, interactive: bool = True) -> 
             input("Press ENTER after the board is in DFU mode... ")
         listing = wait_for_dfu(dfu)
     print("[flash] DFU Upgrade alt=1 detected.")
-    proc = run([dfu, "-R", "-e", "-a", "1", "-D", str(fw)], check=False, capture=True, timeout=120)
-    out = proc.stdout or ""
+    try:
+        proc = run([dfu, "-R", "-e", "-a", "1", "-D", str(fw)], check=False, capture=True, timeout=120)
+        out, status = proc.stdout or "", proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        raw = exc.output or b""
+        out, status = (raw.decode(errors="replace") if isinstance(raw, bytes) else raw), "timeout"
     print("\n".join(ln for ln in out.splitlines() if not ln.startswith("Download\t")))
-    if proc.returncode != 0:
-        # On macOS dfu-util exits non-zero when the device vanishes during the final -R reset,
-        # after a complete download. Accept that only with a clean manifest; the caller then
-        # verifies the running firmware version.
+    if status == "timeout":
+        # Seen on macOS: dfu-util never returns from the final -R reset after a complete download.
+        # Its buffered output is lost when it is killed, so the caller's read-back of the running
+        # version and sample rate decides whether the flash took effect.
+        print("[flash] dfu-util did not exit within 120 s; verifying the running firmware instead.")
+    elif status != 0:
+        # On macOS dfu-util can also exit non-zero when the device vanishes during the final -R
+        # reset after a complete download. Accept that only with a clean manifest.
         completed = "Download done." in out and "status(0)" in out.split("Download done.")[-1] and "Resetting USB" in out
         if not completed:
-            raise RuntimeError(f"dfu-util failed ({proc.returncode}) flashing {label}:\n{out}")
-        print(f"[flash] dfu-util exited {proc.returncode} during the post-download USB reset; download and manifest completed.")
+            raise RuntimeError(f"dfu-util failed ({status}) flashing {label}:\n{out}")
+        print(f"[flash] dfu-util exited {status} during the post-download USB reset; download and manifest completed.")
     return listing
 
 
@@ -776,7 +784,9 @@ def parse_avfoundation_audio_index(listing: str, match: Any = is_xvf_name) -> st
             audio = False
             continue
         m = re.search(r"\]\s*\[(\d+)\]\s*(.+?)\s*$", ln)
-        if audio and m and match(m.group(2)):
+        # FFmpeg master (2026-08) appends "  [uid:...] [serial:...]" to each name.
+        name = re.sub(r"(\s+\[(uid|serial):[^\]]*\])+$", "", m.group(2)) if m else ""
+        if audio and m and match(name):
             return m.group(1)
     return None
 

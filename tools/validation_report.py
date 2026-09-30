@@ -296,6 +296,7 @@ then locates every 512-frame FFmpeg block in the direct capture.</p>{group_table
 <section><h2><code>ffmpeg -t N</code> alone: the original report's method</h2><p>A capture without gaps holds exactly N seconds of audio.</p>{duration_chart(trials) or '<p>–</p>'}</section>
 {matrix_html}
 <h2>Trials</h2>{''.join(trial_sections)}
+{('<section><h2>Notes</h2><ul>' + ''.join(f'<li>{esc(n)}</li>' for n in results['notes']) + '</ul></section>') if results.get('notes') else ''}
 {('<section><h2>Errors</h2><ul>' + ''.join(f'<li>{esc(e)}</li>' for e in results['errors']) + '</ul></section>') if results.get('errors') else ''}
 </body></html>"""
     path = out / "report.html"

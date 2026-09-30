@@ -389,6 +389,8 @@ def render_summary(results: dict[str, Any]) -> str:
                 L.append(f"| {t['name']} | {t['requested_s']:.0f} s | {t['held_s']:.3f} s | {t['missing_pct']:.1f}% | {t['ffmpeg']['classification']} |")
             else:
                 L.append(f"| {t['name']} | – | – | – | {t.get('error')} |")
+    if results.get("notes"):
+        L += ["", "## Notes", ""] + [f"- {n}" for n in results["notes"]]
     if results.get("errors"):
         L += ["", "## Errors", ""] + [f"- {e}" for e in results["errors"]]
     return "\n".join(L) + "\n"
@@ -508,9 +510,12 @@ def main() -> int:
         if board and final and "interrupted" not in results["errors"]:
             try:
                 board.ensure(final)
-                results["firmware_after"] = board.current()
             except Exception as exc:
                 results["errors"].append(f"restoring firmware: {exc}")
+            try:
+                results["firmware_after"] = board.current()
+            except Exception as exc:
+                results["errors"].append(f"reading final firmware: {exc}")
         try:
             import validation_report  # tools/ is on sys.path when run as a script
             validation_report.render(results, out)

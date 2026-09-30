@@ -3,7 +3,8 @@
 image into the XVFDIAG_FAKE_STATE device and resets runtime registers, like a reboot.
 The DFU interface is listed unless the state sets "dfu_visible": false (button fallback).
 "reset_exit" reproduces macOS dfu-util 0.11, which exits 251 when the device vanishes during
-the final -R reset after a complete download; "fail_download" aborts mid-transfer."""
+the final -R reset after a complete download, and "reset_hang" (seconds) the variant that hangs
+there instead; "fail_download" aborts mid-transfer."""
 import json
 import os
 import sys
@@ -33,7 +34,10 @@ elif "-D" in args:
     state_path.write_text(json.dumps(state), encoding="utf-8")
     print("Download done.\nDFU state(7) = dfuMANIFEST, status(0) = No error condition is present")
     print("DFU state(2) = dfuIDLE, status(0) = No error condition is present\nDone!")
-    print("Resetting USB to switch back to Run-Time mode")
+    print("Resetting USB to switch back to Run-Time mode")  # unflushed, like the real tool on a pipe
+    if state.get("reset_hang"):
+        import time
+        time.sleep(state["reset_hang"])
     sys.exit(state.get("reset_exit", 0))
 else:
     sys.exit(74)

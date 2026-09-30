@@ -122,6 +122,16 @@ def test_flash_tolerates_macos_reset_exit_code(fake_dfu, fake_repo, xvf_state, c
     assert "exited 251 during the post-download USB reset" in capsys.readouterr().out
 
 
+def test_flash_tolerates_hang_after_complete_download(fake_dfu, fake_repo, xvf_state, capsys, monkeypatch):
+    set_state(xvf_state, reset_hang=5)
+    real_run = diagnose.run
+    monkeypatch.setattr(diagnose, "run", lambda cmd, **kw: real_run(cmd, **{**kw, "timeout": 2 if "-D" in cmd else kw.get("timeout")}))
+    rel = diagnose.FIRMWARES["v2.1.0_48k2ch"]["rel"]
+    diagnose.flash_firmware(fake_dfu, fake_repo / rel, "v2.1.0_48k2ch")
+    assert json.loads(xvf_state.read_text())["firmware"] == "v2.1.0_48k2ch"
+    assert "did not exit within 120 s; verifying the running firmware instead" in capsys.readouterr().out
+
+
 def test_flash_raises_on_incomplete_download(fake_dfu, fake_repo, xvf_state):
     set_state(xvf_state, fail_download=True)
     rel = diagnose.FIRMWARES["v2.1.0_48k2ch"]["rel"]
@@ -264,6 +274,11 @@ Error opening input file ."""
 
 def test_parse_avfoundation_audio_index():
     assert diagnose.parse_avfoundation_audio_index(AVF_LISTING) == "6"
+    master = ("[AVFoundation indev @ 0x1] AVFoundation audio devices:\n"
+              "[AVFoundation indev @ 0x1] [0] reSpeaker XVF3800 4-Mic Array  [uid:AppleUSBAudioEngine:Seeed Studio:x:1,2] [serial:1149]\n"
+              "[AVFoundation indev @ 0x1] [2] MacBook Pro Microphone  [uid:BuiltInMicrophoneDevice]")
+    assert diagnose.parse_avfoundation_audio_index(master) == "0"
+    assert diagnose.parse_avfoundation_audio_index(master, lambda n: n == "MacBook Pro Microphone") == "2"
     assert diagnose.parse_avfoundation_audio_index(AVF_LISTING.replace("reSpeaker XVF3800 4-Mic Array", "USB Mic")) is None
 
 
