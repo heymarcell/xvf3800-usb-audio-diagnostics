@@ -22,9 +22,11 @@ import diagnose as d  # noqa: E402
 
 GROUP_LABELS = {
     "xvf48k_homebrew": "XVF3800 v2.1.1 48 kHz · Homebrew FFmpeg",
-    "xvf48k_fixed": "XVF3800 v2.1.1 48 kHz · FFmpeg with the upstream fix",
+    "xvf48k_fixed": "XVF3800 v2.1.1 48 kHz · FFmpeg at the upstream fix commit",
+    "xvf48k_master": "XVF3800 v2.1.1 48 kHz · FFmpeg master",
     "builtin_mic_homebrew": "Built-in microphone 48 kHz · Homebrew FFmpeg",
-    "builtin_mic_fixed": "Built-in microphone 48 kHz · FFmpeg with the upstream fix",
+    "builtin_mic_fixed": "Built-in microphone 48 kHz · FFmpeg at the upstream fix commit",
+    "builtin_mic_master": "Built-in microphone 48 kHz · FFmpeg master",
     "xvf16k_homebrew": "XVF3800 v2.1.1 native 16 kHz · Homebrew FFmpeg",
 }
 FFMPEG_COLOR, DIRECT_COLOR = "#d1495b", "#00798c"
@@ -285,7 +287,7 @@ img{{max-width:100%;display:block;margin:12px auto}}.muted{{color:#57606a;font-w
 <h1>XVF3800 host capture path validation</h1>
 <p class='muted'>Run {esc(results.get('started'))} · xvfdiag {esc(d.APP_VERSION)} · {esc(env.get('platform'))} · Python {esc(env.get('python'))}<br>
 Homebrew FFmpeg: {esc((env.get('system_ffmpeg') or {}).get('version'))}<br>
-FFmpeg with the fix: {esc((stages.get('ffmpeg') or {}).get('version', '–'))} (commit <code>{esc((stages.get('ffmpeg') or {}).get('commit', '–'))}</code>)<br>
+FFmpeg built from source: {esc((stages.get('ffmpeg') or {}).get('version', '–'))} (commit <code>{esc((stages.get('ffmpeg') or {}).get('commit', '–'))}</code>)<br>
 Board firmware before / after: {esc(results.get('firmware_before') or 'n/a')} / {esc(results.get('firmware_after') or 'n/a')} · playback: {esc(stages.get('hostpath', {}).get('playback_device', '–'))}</p>
 <section><h2>Summary</h2>{verdict(trials) or '<p>No FFmpeg-vs-direct trials in this run.</p>'}
 <table><thead><tr><th>Stage</th><th></th><th>Result</th></tr></thead><tbody>{stage_rows}</tbody></table></section>

@@ -14,7 +14,8 @@ def load():
 def test_stages_and_pinned_fix():
     v = load()
     assert v.STAGES[:4] == v.SILENT_STAGES == ["unit", "upstream", "readonly", "ffmpeg"]
-    assert len(v.FFMPEG_FIX_COMMIT) == 40 and "--enable-indev=avfoundation" in v.FFMPEG_CONFIGURE
+    assert len(v.FFMPEG_FIX_COMMIT) == len(v.FFMPEG_SOURCE_COMMIT) == 40 and "--enable-indev=avfoundation" in v.FFMPEG_CONFIGURE
+    assert v.LATEST_48K in __import__("diagnose").FIRMWARES
     assert v.ISSUE_ROUTE["left"] == (8, 0) and v.ISSUE_ROUTE["right"] == (7, 3)
 
 

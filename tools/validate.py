@@ -5,15 +5,16 @@ Stages, in order (select with --stages, or --silent for the first four):
   unit      hardware-free test suite                                   silent
   upstream  pinned reSpeaker repository: firmware hashes, xvf_host CLI     silent, network
   readonly  read-only checks against the connected XVF3800                silent
-  ffmpeg    build FFmpeg at the upstream AVFoundation fix (macOS)          silent, network
+  ffmpeg    build current FFmpeg master, which has the AVFoundation fix     silent, network
   matrix    full diagnostic matrix incl. FFmpeg host-path control         plays audio, reflashes, ~25 min
   hostpath  repeated FFmpeg vs direct-capture trials: Homebrew FFmpeg and
-            the fixed build on v2.1.1 48k, a -t duration check, the
+            the master build on the latest 48 kHz firmware, -t duration checks, the
             built-in microphone as a non-XVF control, and v2.1.1 16k       plays audio, reflashes, ~15 min
 
 Everything lands in validation/<timestamp>/: report.html (statistics and diagrams), SUMMARY.md,
 results.json, log.txt and every recording.
-The board is returned to the firmware it was running, and the output volume to its level.
+The board is returned to the firmware it was running (or --final-firmware), and the output
+volume to its level.
 
 Stop immediately:  python tools/validate.py --stop
 """
@@ -39,7 +40,12 @@ STAGES = ["unit", "upstream", "readonly", "ffmpeg", "matrix", "hostpath"]
 SILENT_STAGES = STAGES[:4]
 PIDFILE = REPO / "validation" / "running.pid"
 # FFmpeg commit "avdevice/avfoundation: wait for frame consumption to avoid dropping A/V frames".
+# Not in any release up to 9.0.2.
 FFMPEG_FIX_COMMIT = "ddf8f40301af20ad985cf369d1eb6d114be0c8f0"
+# FFmpeg master when last validated (2026-09-30); it must contain the fix. Bump deliberately.
+FFMPEG_SOURCE_COMMIT = "e9dc8fd4d6c4f46a02fe9d739141efb32596f7fe"
+# Latest 48 kHz image in the pinned reSpeaker repository.
+LATEST_48K = "v2.1.1_48k2ch"
 FFMPEG_CONFIGURE = [
     "--disable-everything", "--disable-doc", "--disable-network", "--disable-ffplay", "--disable-ffprobe",
     "--enable-indev=avfoundation", "--enable-muxer=wav", "--enable-encoder=pcm_s16le",
@@ -131,16 +137,16 @@ def pytest_stage(target: str, env: dict[str, str] | None = None) -> dict[str, An
 
 # --- stages: FFmpeg with the upstream fix -------------------------------------------------------
 
-def build_fixed_ffmpeg() -> dict[str, Any]:
+def build_source_ffmpeg(commit: str = FFMPEG_SOURCE_COMMIT) -> dict[str, Any]:
     if platform.system() != "Darwin":
         return {"ok": False, "skipped": "AVFoundation exists only on macOS"}
-    src = REPO / d.CACHE_DIR_NAME / f"ffmpeg-{FFMPEG_FIX_COMMIT[:12]}"
+    src = REPO / d.CACHE_DIR_NAME / f"ffmpeg-{commit[:12]}"
     binary = src / "ffmpeg"
     if not binary.exists():
         src.mkdir(parents=True, exist_ok=True)
         steps = [
             ["git", "init", "-q"],
-            ["git", "fetch", "-q", "--depth", "1", "https://github.com/FFmpeg/FFmpeg.git", FFMPEG_FIX_COMMIT],
+            ["git", "fetch", "-q", "--depth", "1", "https://github.com/FFmpeg/FFmpeg.git", commit],
             ["git", "checkout", "-q", "FETCH_HEAD"],
             ["./configure", *FFMPEG_CONFIGURE],
             ["make", f"-j{os.cpu_count() or 4}", "ffmpeg"],
@@ -151,8 +157,8 @@ def build_fixed_ffmpeg() -> dict[str, Any]:
     src_text = (src / "libavdevice" / "avfoundation.m").read_text(encoding="utf-8")
     devices = subprocess.run([str(binary), "-hide_banner", "-devices"], capture_output=True, text=True).stdout
     version = subprocess.run([str(binary), "-version"], capture_output=True, text=True).stdout.splitlines()[0]
-    ok = "avfoundation" in devices and "while ((_context->current_audio_frame != nil)" in src_text
-    return {"ok": ok, "binary": str(binary), "commit": FFMPEG_FIX_COMMIT, "version": version}
+    has_fix = "while ((_context->current_audio_frame != nil)" in src_text
+    return {"ok": "avfoundation" in devices and has_fix, "binary": str(binary), "commit": commit, "version": version, "has_avfoundation_fix": has_fix}
 
 
 def system_ffmpeg() -> dict[str, Any]:
@@ -280,14 +286,14 @@ def find_builtin_mic(sd: Any) -> int | None:
     return next((i for i, dev in enumerate(devices) if dev["max_input_channels"] > 0 and re.search(r"macbook|built-in", dev["name"], re.I)), None)
 
 
-def hostpath_stage(out: Path, board: Board, fixed_ffmpeg: str | None, trials: int, seconds: float, rt: Any) -> dict[str, Any]:
+def hostpath_stage(out: Path, board: Board, source_ffmpeg: str | None, trials: int, seconds: float, rt: Any) -> dict[str, Any]:
     np, sig, sd, sf = rt
     res: dict[str, Any] = {"trials": []}
     if platform.system() != "Darwin" or not d.shutil.which("ffmpeg"):
         return {**res, "skipped": "needs macOS with ffmpeg (AVFoundation)"}
     stim = speech_stimulus(out / "hostpath" / "speech_48k.wav", seconds, np, sf)
     brew = d.shutil.which("ffmpeg")
-    tools = [("homebrew", brew)] + ([("fixed", fixed_ffmpeg)] if fixed_ffmpeg else [])
+    tools = [("homebrew", brew)] + ([("master", source_ffmpeg)] if source_ffmpeg else [])
 
     def record(name: str, kind: str, **kw: Any) -> None:
         print(f"\n[hostpath] {name}", flush=True)
@@ -302,8 +308,8 @@ def hostpath_stage(out: Path, board: Board, fixed_ffmpeg: str | None, trials: in
         print(f"[hostpath] {name}: " + (f"{cont.get('splices')} splices, {cont.get('missing_pct', 0):.1f}% missing" if cont.get("comparable")
               else f"held {r['held_s']:.3f}/{r['requested_s']:.0f} s" if "held_s" in r else r.get("error") or cont.get("reason", "?")), flush=True)
 
-    # v2.1.1 48 kHz with the issue's routing
-    xvf = board.ensure("v2.1.1_48k2ch")
+    # latest 48 kHz firmware with the issue's routing
+    xvf = board.ensure(LATEST_48K)
     d.set_route(board.host_cmd, ISSUE_ROUTE)
     res["route_48k"] = {k: v for k, v in d.snapshot_xvf(board.host_cmd).items() if k.startswith(("VERSION", "AUDIO_MGR_OP", "BLD_MSG"))}
     out_idx = d.choose_output_device(sd, None, xvf)
@@ -427,6 +433,7 @@ def main() -> int:
     ap.add_argument("--trial-seconds", type=float, default=40.0)
     ap.add_argument("--stop", action="store_true", help="stop a running validation immediately")
     ap.add_argument("--rebuild-report", metavar="VALIDATION_DIR", help="recompute analysis and reports of a finished run from its recordings")
+    ap.add_argument("--final-firmware", choices=sorted(d.FIRMWARES), help="leave the board on this image instead of the one it was running")
     args = ap.parse_args()
     if args.stop:
         return stop_running()
@@ -462,11 +469,11 @@ def main() -> int:
             if name in stages:
                 print(f"\n=== {name} ===", flush=True)
                 results["stages"][name] = pytest_stage(target, env)
-        fixed = None
+        source = None
         if "ffmpeg" in stages or "hostpath" in stages:
-            print("\n=== ffmpeg (build at the upstream AVFoundation fix) ===", flush=True)
-            results["stages"]["ffmpeg"] = r = build_fixed_ffmpeg()
-            fixed = r.get("binary") if r.get("ok") else None
+            print(f"\n=== ffmpeg (build master {FFMPEG_SOURCE_COMMIT[:10]}) ===", flush=True)
+            results["stages"]["ffmpeg"] = r = build_source_ffmpeg()
+            source = r.get("binary") if r.get("ok") else None
         if audible:
             board = Board(sd)
             results["firmware_before"] = board.current()
@@ -478,7 +485,7 @@ def main() -> int:
             d.refresh_audio_devices(sd)
         if "hostpath" in stages:
             print("\n=== hostpath ===", flush=True)
-            r = hostpath_stage(out, board, fixed, args.trials, args.trial_seconds, rt)
+            r = hostpath_stage(out, board, source, args.trials, args.trial_seconds, rt)
             r["ok"] = "skipped" in r or (bool(r["trials"]) and not any("error" in t for t in r["trials"]))
             results["stages"]["hostpath"] = r
     except KeyboardInterrupt:
@@ -497,9 +504,10 @@ def main() -> int:
             pass
         if volume_before is not None:
             set_output_volume(volume_before)
-        if board and results.get("firmware_before") and "interrupted" not in results["errors"]:
+        final = args.final_firmware or results.get("firmware_before")
+        if board and final and "interrupted" not in results["errors"]:
             try:
-                board.ensure(results["firmware_before"])
+                board.ensure(final)
                 results["firmware_after"] = board.current()
             except Exception as exc:
                 results["errors"].append(f"restoring firmware: {exc}")

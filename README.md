@@ -45,9 +45,9 @@ The runner creates its own virtual environment, downloads the official reSpeaker
 | `unit` | hardware-free test suite | no |
 | `upstream` | pinned reSpeaker repository: firmware hashes, `xvf_host.py` CLI contract | no |
 | `readonly` | read-only checks against the connected board | no |
-| `ffmpeg` | builds FFmpeg at the upstream AVFoundation fix (macOS) | no |
+| `ffmpeg` | builds current FFmpeg master, which contains the AVFoundation fix (macOS) | no |
 | `matrix` | the full diagnostic run above, including the FFmpeg control | yes, reflashes |
-| `hostpath` | repeated FFmpeg vs direct-capture trials on v2.1.1 48k with Homebrew FFmpeg and the fixed build, `ffmpeg -t` duration checks, the built-in microphone as a non-XVF control, and v2.1.1 16k | yes, reflashes |
+| `hostpath` | repeated FFmpeg vs direct-capture trials on the latest 48 kHz firmware with Homebrew FFmpeg and the master build, `ffmpeg -t` duration checks, the built-in microphone as a non-XVF control, and v2.1.1 16k | yes, reflashes |
 
 ```bash
 python tools/validate.py --silent                 # only the silent stages
@@ -56,7 +56,7 @@ python tools/validate.py --stages unit            # just the test suite
 python tools/validate.py --stop                   # stop a running validation immediately
 ```
 
-The board is returned to the firmware it was running and the output volume to its previous level.
+The board is returned to the firmware it was running (or the image given with `--final-firmware`), and the output volume to its previous level. `--rebuild-report validation/<timestamp>` recomputes a finished run from its recordings.
 
 ## Publishing a run
 
