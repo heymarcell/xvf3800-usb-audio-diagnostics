@@ -44,11 +44,15 @@ def label_of(group: str) -> str:
     return GROUP_LABELS.get(group, group)
 
 
-def png(fig: Any) -> str:
+def png_bytes(fig: Any) -> bytes:
     bio = io.BytesIO()
     fig.savefig(bio, format="png", dpi=100, bbox_inches="tight")
     plt.close(fig)
-    return f"<img alt='' src='data:image/png;base64,{base64.b64encode(bio.getvalue()).decode('ascii')}'>"
+    return bio.getvalue()
+
+
+def img(data: bytes) -> str:
+    return f"<img alt='' src='data:image/png;base64,{base64.b64encode(data).decode('ascii')}'>"
 
 
 def reference_offset(cont: dict[str, Any], frame: int) -> int:
@@ -86,7 +90,8 @@ def fold_profile(x: np.ndarray, period: int = 512) -> np.ndarray:
     return prof / max(float(np.median(prof)), 1e-15)
 
 
-def trial_plots(t: dict[str, Any]) -> str:
+def trial_figures(t: dict[str, Any]) -> list[tuple[str, bytes]]:
+    """(key, PNG) for one FFmpeg-vs-direct trial: fold, timeline, zoom (when spliced), spectrum, spectrogram."""
     tdir = Path(t["dir"])
     ff, rate = sf.read(str(tdir / "ffmpeg.wav"), always_2d=True, dtype="float64")
     di, _ = sf.read(str(tdir / "direct.wav"), always_2d=True, dtype="float64")
@@ -99,7 +104,7 @@ def trial_plots(t: dict[str, Any]) -> str:
     ax.plot(fold_profile(di[:, ch]), color=DIRECT_COLOR, linewidth=.9, label="direct (PortAudio/CoreAudio)")
     ax.set(title="Mean |x[n]-x[n-1]| per phase modulo 512 (1 = median phase)", xlabel="frame index mod 512", ylabel="x median")
     ax.legend(loc="upper right"); ax.grid(alpha=.2)
-    parts.append(png(fig))
+    parts.append(("fold", png_bytes(fig)))
 
     sp = np.array(cont["splice_list"], dtype=np.int64).reshape(-1, 2)
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 2.8), gridspec_kw={"width_ratios": [2, 1]})
@@ -110,7 +115,7 @@ def trial_plots(t: dict[str, Any]) -> str:
     a1.set(title="Audio missing from the FFmpeg recording", xlabel="FFmpeg recording time (s)", ylabel="cumulative missing (ms)"); a1.grid(alpha=.2)
     a2.set(title="Time between splices", xlabel="ms", ylabel="splices"); a2.grid(alpha=.2)
     fig.tight_layout()
-    parts.append(png(fig))
+    parts.append(("timeline", png_bytes(fig)))
 
     if len(sp):
         dd = np.abs(np.diff(ff[:, ch]))
@@ -131,14 +136,14 @@ def trial_plots(t: dict[str, Any]) -> str:
             b2.set(title="Direct capture of the same moment: continuous", xlabel="ms from the splice", ylabel="FS")
             b2.legend(loc="upper right"); b2.grid(alpha=.2)
             fig.tight_layout()
-            parts.append(png(fig))
+            parts.append(("zoom", png_bytes(fig)))
 
     fig, ax = plt.subplots(figsize=(10, 2.8))
     for x, color, label in ((ff, FFMPEG_COLOR, "FFmpeg/AVFoundation"), (di, DIRECT_COLOR, "direct")):
         fr, p = sig.welch(x[:, ch], fs=rate, nperseg=min(8192, len(x)))
         ax.semilogy(fr, p + 1e-20, color=color, linewidth=.8, label=label)
     ax.set(title="Welch power spectrum", xlabel="Hz", ylabel="PSD", xlim=(0, rate / 2)); ax.legend(loc="upper right"); ax.grid(alpha=.2)
-    parts.append(png(fig))
+    parts.append(("spectrum", png_bytes(fig)))
 
     n = min(len(ff), len(di), int(12 * rate))
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.0), sharey=True)
@@ -148,8 +153,12 @@ def trial_plots(t: dict[str, Any]) -> str:
         axx.set(title=f"Spectrogram, first 12 s: {title}", xlabel="s")
     axes[0].set_ylabel("Hz")
     fig.tight_layout()
-    parts.append(png(fig))
-    return "".join(parts)
+    parts.append(("spectrogram", png_bytes(fig)))
+    return parts
+
+
+def trial_plots(t: dict[str, Any]) -> str:
+    return "".join(img(data) for _, data in trial_figures(t))
 
 
 def mean_sd(values: list[float]) -> str:
@@ -210,10 +219,10 @@ def verdict(trials: list[dict[str, Any]]) -> str:
     return f"<ul>{''.join(lines)}</ul>" if lines else ""
 
 
-def duration_chart(trials: list[dict[str, Any]]) -> str:
+def duration_figure(trials: list[dict[str, Any]]) -> bytes | None:
     dur = [t for t in trials if t["kind"] == "duration" and "held_s" in t]
     if not dur:
-        return ""
+        return None
     fig, ax = plt.subplots(figsize=(10, 0.6 + 0.45 * len(dur)))
     names = [t["name"] for t in dur]
     ax.barh(names, [t["requested_s"] for t in dur], color="#d9d9d9", label="requested (-t)")
@@ -222,9 +231,16 @@ def duration_chart(trials: list[dict[str, Any]]) -> str:
         ax.text(t["requested_s"], i, f"  {t['missing_pct']:.1f}% missing", va="center", fontsize=8)
     ax.invert_yaxis(); ax.set(xlabel="seconds", xlim=(0, max(t["requested_s"] for t in dur) * 1.18)); ax.grid(alpha=.2, axis="x")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.35 if len(dur) < 4 else -0.18), ncol=2, frameon=False)
+    return png_bytes(fig)
+
+
+def duration_chart(trials: list[dict[str, Any]]) -> str:
+    dur = [t for t in trials if t["kind"] == "duration" and "held_s" in t]
+    if not dur:
+        return ""
     rows = "".join(f"<tr><td>{esc(t['name'])}</td><td>{t['requested_s']:.0f} s</td><td>{t['held_s']:.3f} s</td><td>{t['missing_pct']:.1f}%</td>"
                    f"<td>{esc(t['ffmpeg']['classification'])}</td></tr>" for t in dur)
-    return (png(fig) + "<table><thead><tr><th>Trial</th><th>Requested</th><th>Audio held</th><th>Missing</th><th>Recording</th></tr></thead>"
+    return (img(duration_figure(trials)) + "<table><thead><tr><th>Trial</th><th>Requested</th><th>Audio held</th><th>Missing</th><th>Recording</th></tr></thead>"
             f"<tbody>{rows}</tbody></table>")
 
 

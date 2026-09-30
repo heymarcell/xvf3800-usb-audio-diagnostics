@@ -1,0 +1,65 @@
+{
+  "run": "20260930-185836",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 8406,
+      "sha256": "a6df78ac4faa16506119c46c2cfd1bc711a9011d6cf9c4ac40f9a22dc3f410c4"
+    },
+    {
+      "path": "SUMMARY.md",
+      "bytes": 6087,
+      "sha256": "f3524f9ab1657a01f209b5a75cea1099133f3f05b9ca79939294370525b9326a"
+    },
+    {
+      "path": "figures/builtin_mic_homebrew_ab_fold.png",
+      "bytes": 50079,
+      "sha256": "ea1093f5c0983a06f8b1dfe3b474c8b3188b518e2e7d38bd63c2bb2556a2d356"
+    },
+    {
+      "path": "figures/durations.png",
+      "bytes": 28177,
+      "sha256": "d12b43da7aeb00cac938cc43ec7eea6433cc0e204c7c76f2454ce9dbd61273b3"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_fold.png",
+      "bytes": 35424,
+      "sha256": "6a8a1e19571755dedee274c422d5ec44252c15da710114f5f469d6b75008d7aa"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_spectrogram.png",
+      "bytes": 194136,
+      "sha256": "ea9eb6742c3d095696d30c042d8826147789395b206d2a91cdab7e7538cb0377"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_timeline.png",
+      "bytes": 30120,
+      "sha256": "7fd5368895331adc007231c2f0b18038d21e419a56e8d2029b5d2d6d37b9692b"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_zoom.png",
+      "bytes": 57295,
+      "sha256": "8ef5d30a1edddb6a0bb249f01568f3bc1ccc16f138eb11a99456d32a9dc5204e"
+    },
+    {
+      "path": "figures/xvf48k_master_ab1_fold.png",
+      "bytes": 112682,
+      "sha256": "f373387e3f0f0dced1eb9cafc143ef0326154b55134d2f43c8e1c3789841995d"
+    },
+    {
+      "path": "matrix-report.html",
+      "bytes": 18758787,
+      "sha256": "e5d89fb81fa65f42d8caea09aed2c6ddaf8a4a79019d47797b2130ea482c0d29"
+    },
+    {
+      "path": "report.html",
+      "bytes": 4978967,
+      "sha256": "b26334cfa259dbbbfc08da70b945d4df45956bf615aab4d1d4ca1eccc3a415b4"
+    },
+    {
+      "path": "results.json",
+      "bytes": 297467,
+      "sha256": "2e82b3c45698e156d8beac2e8d15457ccdd1f71ef63108dd999c77c3004595f9"
+    }
+  ]
+}

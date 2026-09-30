@@ -6,7 +6,13 @@ For each run intended to support issue #39, publish the compact evidence set und
 
 `results/issue-39/<run-id>/`
 
-Use:
+Validation runs are published with:
+
+```bash
+python tools/publish_validation.py validation/<timestamp> --with-matrix
+```
+
+Single diagnostic runs are imported with:
 
 ```bash
 python tools/import_run.py runs/<run-id>

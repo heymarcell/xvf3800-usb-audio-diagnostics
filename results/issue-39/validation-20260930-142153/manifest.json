@@ -1,0 +1,60 @@
+{
+  "run": "20260930-142153",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 7820,
+      "sha256": "15e9abcc0ca74d9f2b68a3aab7fac6a3237ef5fdcf27e3c1162d71190c96dafd"
+    },
+    {
+      "path": "SUMMARY.md",
+      "bytes": 5677,
+      "sha256": "137e97718d053e1e52f0f36607ddb87fce9e1db14c246a67173bbfcc98e219f3"
+    },
+    {
+      "path": "figures/builtin_mic_homebrew_ab_fold.png",
+      "bytes": 62470,
+      "sha256": "77e853590ab2ebf0c59074537070f8e01e757106538a691fa779fc1b39d01289"
+    },
+    {
+      "path": "figures/durations.png",
+      "bytes": 28451,
+      "sha256": "26d77fc86df63e858e9353599b1970fb10c39733dfb5e7c6e3a2a4d86fdc72c3"
+    },
+    {
+      "path": "figures/xvf48k_fixed_ab1_fold.png",
+      "bytes": 111352,
+      "sha256": "0c455bb2ae455daaf0bcffa952cf8f6c64821a25708933e4289f88786a8dcb1b"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_fold.png",
+      "bytes": 39590,
+      "sha256": "615cf95b2ab849885137b15c893b0d25a79b1c244a174a9687033a5b361e92d4"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_spectrogram.png",
+      "bytes": 201052,
+      "sha256": "48d4ddd96462a5494032aaee1b2d65edf9337b2241c82e7f10cccbf224e99a07"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_timeline.png",
+      "bytes": 29623,
+      "sha256": "36a13168fa0fd87352ebd0639236f34c0481c86e1851d00f9588dfd8d705f8b4"
+    },
+    {
+      "path": "figures/xvf48k_homebrew_ab1_zoom.png",
+      "bytes": 52262,
+      "sha256": "dacfc7cfdde8d874c6d351249dc7e70a98fefd7dcb867f222467f8722881d759"
+    },
+    {
+      "path": "report.html",
+      "bytes": 5028883,
+      "sha256": "f2ed1ee997b1c5f7b891dd14fe6255d61f2d2f47f2aa18b8d4aef895a8ec29de"
+    },
+    {
+      "path": "results.json",
+      "bytes": 284793,
+      "sha256": "b703d5d85850e2f490bb979c5921bf762ba329f9aeed319280aa2a5a038149f1"
+    }
+  ]
+}

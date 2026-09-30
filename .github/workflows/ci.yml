@@ -27,7 +27,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libportaudio2
       - name: Compile
-        run: python -m py_compile diagnose.py tools/import_run.py tools/validate.py
+        run: python -m py_compile diagnose.py tools/import_run.py tools/validate.py tools/validation_report.py tools/publish_validation.py
       - name: Install test dependencies
         run: python -c "import subprocess, sys, diagnose; subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pytest', *diagnose.PY_DEPS])"
       - name: Test suite

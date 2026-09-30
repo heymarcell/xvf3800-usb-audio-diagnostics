@@ -2,7 +2,7 @@
 
 Reproducible diagnostic suite for the 48 kHz click/discontinuity report in [`respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY#39`](https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY/issues/39). It flashes the official firmware images, records every documented signal-path checkpoint while an independent speaker plays a deterministic stimulus, and analyzes the captures. The same code runs on macOS, Linux and Windows.
 
-The repository contains the exact test voice WAV, the runner, a full validation script, and a `results/` area for compact evidence from real hardware runs. No hardware results have been published yet.
+The repository contains the exact test voice WAV, the runner, a full validation script, and the published evidence from real hardware runs in [`results/issue-39/`](results/issue-39/README.md).
 
 ## Quick start
 
@@ -58,15 +58,25 @@ python tools/validate.py --stop                   # stop a running validation im
 
 The board is returned to the firmware it was running (or the image given with `--final-firmware`), and the output volume to its previous level. `--rebuild-report validation/<timestamp>` recomputes a finished run from its recordings.
 
-## Publishing a run
+## Publishing results
 
-Runs are written under `runs/` and ignored by Git because they contain raw recordings, including whatever the room sounded like. Import the compact evidence with:
+Runs and validations are written under `runs/` and `validation/`, which Git ignores because they contain raw recordings, including whatever the room sounded like.
+
+Publish a validation run (report, figures, summary and numbers, no recordings or logs, no local paths) with:
+
+```bash
+python tools/publish_validation.py validation/<timestamp> --with-matrix
+```
+
+It creates `results/issue-39/validation-<timestamp>/` with a README that GitHub renders with the key figures, the full HTML reports, and a `manifest.json` of SHA-256 hashes. The HTML reports are served by GitHub Pages so links to them open rendered.
+
+Import a single diagnostic run's compact evidence with:
 
 ```bash
 python tools/import_run.py runs/xvf3800-diagnostic-YYYYMMDD-HHMMSS
 ```
 
-This copies `report.html`, `summary.csv`, `analysis.json`, `session.json`, `github_comment.md` and `github-share-bundle.zip` into `results/issue-39/<run-id>/`, with SHA-256 hashes in `manifest.json`. Files GitHub would reject belong on a GitHub Release; keep their hash and link in the result directory.
+This copies `report.html`, `summary.csv`, `analysis.json`, `session.json`, `github_comment.md` and `github-share-bundle.zip` into `results/issue-39/<run-id>/`, with SHA-256 hashes in `manifest.json`. The bundle contains FLAC recordings; listen before publishing it. Files GitHub would reject belong on a GitHub Release; keep their hash and link in the result directory.
 
 ## Canonical test voice
 
@@ -103,10 +113,11 @@ diagnose.py              runner: flashing, capture, analysis, report
 tools/validate.py        full end-to-end validation
 tools/validation_report.py  its HTML report
 tools/import_run.py      publishes a run's compact evidence into results/
+tools/publish_validation.py  publishes a validation run into results/
 assets/voice/            canonical speech fixture and its provenance
 docs/METHODOLOGY.md      measurement rationale and thresholds
 examples/                simulated report and summary
-results/issue-39/        published evidence (none yet)
+results/issue-39/        published evidence
 tests/                   pytest suite, with fakes for the device, dfu-util and PortAudio
 ```
 
