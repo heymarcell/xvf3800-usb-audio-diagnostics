@@ -44,7 +44,7 @@ def test_publish_validation(tmp_path, rt):
                           "hostpath": {"ok": True, "trials": trials, "playback_device": "Speakers"}}}
     rep.render(results, run)
     (run / "results.json").write_text(json.dumps(results))
-    (run / "SUMMARY.md").write_text(val.render_summary(results) + f"\nSession: `{run}/matrix/x`\n")
+    (run / "SUMMARY.md").write_text(val.render_summary(results) + f"\nSession: `{run}/matrix/x`\n", encoding="utf-8")
     (run / "log.txt").write_text("private log")
 
     dest = pub.publish(run, tmp_path / "published", with_matrix=True)
@@ -60,7 +60,7 @@ def test_publish_validation(tmp_path, rt):
     for line in readme.splitlines():
         if line.startswith("!["):
             assert (dest / line.split("](")[1].rstrip(")")).is_file()
-    for f in json.loads((dest / "manifest.json").read_text())["files"]:
+    for f in json.loads((dest / "manifest.json").read_text(encoding="utf-8"))["files"]:
         assert hashlib.sha256((dest / f["path"]).read_bytes()).hexdigest() == f["sha256"]
     assert "validation-20260930-185836/README.md" in (tmp_path / "published" / "README.md").read_text(encoding="utf-8")
     assert json.loads((dest / "results.json").read_text())["stages"]["hostpath"]["trials"][0]["dir"] == "hostpath/xvf48k_homebrew_ab1"
