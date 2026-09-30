@@ -38,7 +38,7 @@ The runner creates its own virtual environment, downloads the official reSpeaker
 
 ## Full validation
 
-`tools/validate.py` runs every check end to end and writes `validation/<timestamp>/SUMMARY.md`, `results.json`, `log.txt` and all recordings:
+`tools/validate.py` runs every check end to end. It writes `validation/<timestamp>/report.html` (statistics across trials; per trial the folded mod-512 profile of FFmpeg vs direct capture, a dropped-buffer timeline, a sample-level zoom of the frames FFmpeg lost, and spectra and spectrograms of both), plus `SUMMARY.md`, `results.json`, `log.txt` and all recordings. The matrix run's own report sits next to it.
 
 | Stage | What it does | Audible |
 |---|---|---|
@@ -101,6 +101,7 @@ This runs the hardware-free suite inside the runner's virtual environment. The s
 ```text
 diagnose.py              runner: flashing, capture, analysis, report
 tools/validate.py        full end-to-end validation
+tools/validation_report.py  its HTML report
 tools/import_run.py      publishes a run's compact evidence into results/
 assets/voice/            canonical speech fixture and its provenance
 docs/METHODOLOGY.md      measurement rationale and thresholds

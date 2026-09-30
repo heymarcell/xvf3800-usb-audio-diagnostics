@@ -11,7 +11,8 @@ Stages, in order (select with --stages, or --silent for the first four):
             the fixed build on v2.1.1 48k, a -t duration check, the
             built-in microphone as a non-XVF control, and v2.1.1 16k       plays audio, reflashes, ~15 min
 
-Everything lands in validation/<timestamp>/ (log.txt, results.json, SUMMARY.md, recordings).
+Everything lands in validation/<timestamp>/: report.html (statistics and diagrams), SUMMARY.md,
+results.json, log.txt and every recording.
 The board is returned to the firmware it was running, and the output volume to its level.
 
 Stop immediately:  python tools/validate.py --stop
@@ -291,7 +292,7 @@ def hostpath_stage(out: Path, board: Board, fixed_ffmpeg: str | None, trials: in
             r = (ab_trial if kind == "ab" else duration_trial)(out / "hostpath" / name, **kw, rt=rt)
         except Exception as exc:
             r = {"error": f"{type(exc).__name__}: {exc}"}
-        r.update(name=name, kind=kind, seconds=round(time.time() - t0, 1))
+        r.update(name=name, kind=kind, dir=str(out / "hostpath" / name), seconds=round(time.time() - t0, 1))
         res["trials"].append(r)
         cont = r.get("continuity", {})
         print(f"[hostpath] {name}: " + (f"{cont.get('splices')} splices, {cont.get('missing_pct', 0):.1f}% missing" if cont.get("comparable")
@@ -467,10 +468,15 @@ def main() -> int:
                 results["firmware_after"] = board.current()
             except Exception as exc:
                 results["errors"].append(f"restoring firmware: {exc}")
+        try:
+            import validation_report  # tools/ is on sys.path when run as a script
+            validation_report.render(results, out)
+        except Exception as exc:
+            results["errors"].append(f"HTML report: {type(exc).__name__}: {exc}")
         (out / "results.json").write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
         (out / "SUMMARY.md").write_text(render_summary(results), encoding="utf-8")
         PIDFILE.unlink(missing_ok=True)
-        print(f"\nResults: {out / 'SUMMARY.md'}", flush=True)
+        print(f"\nResults: {out / 'report.html'} and {out / 'SUMMARY.md'}", flush=True)
     failed = [n for n, r in results["stages"].items() if not r.get("ok")]
     return 1 if failed or results["errors"] else 0
 

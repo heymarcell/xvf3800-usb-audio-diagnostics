@@ -879,6 +879,9 @@ def buffer_continuity(reference: Path, test: Path, sf: Any, np: Any, sig: Any, b
         "all_multiples_of_block": all(x["frames_skipped"] % block == 0 for x in splices),
         "splice_positions_mod_block": sorted({x["test_frame"] % block for x in splices}),
         "first_splices": splices[:20],
+        # reference_frame = test_frame + offset; the offset grows by frames_skipped at each splice
+        "anchor": {"test_frame": int(k0 * block), "reference_frame": int(pos)},
+        "splice_list": [[x["test_frame"], x["frames_skipped"]] for x in splices],
     }
 
 
