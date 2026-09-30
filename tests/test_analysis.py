@@ -267,7 +267,7 @@ def test_buffer_continuity_clean_and_incomparable(tmp_path, rt):
     ref, _, _ = spliced(drop=0)
     r, t = write_pair(tmp_path, rt, ref, ref[5 * 512:])
     res = diagnose.buffer_continuity(r, t, rt.sf, np, rt.sig)
-    assert res["splices"] == 0 and res["bit_exact_blocks"] == res["blocks"]
+    assert res["splices"] == 0 and res["identical_blocks"] == res["located_blocks"] == res["blocks"] and res["max_lsb_difference"] == 0
     r2, t2 = write_pair(tmp_path, rt, ref, np.random.default_rng(0).normal(0, 0.2, len(ref)))
     assert diagnose.buffer_continuity(r2, t2, rt.sf, np, rt.sig)["comparable"] is False
     rt.sf.write(str(t2), np.zeros((48000, 2)), 16000)

@@ -854,7 +854,12 @@ def buffer_continuity(reference: Path, test: Path, sf: Any, np: Any, sig: Any, b
     pos, r = locate(k0, 0, len(a) - block)
     if r < min_corr:
         return {"comparable": False, "reason": f"no matching anchor (best correlation {r:.5f})"}
-    exact, splices = 1, []
+    # Located blocks are compared sample by sample in 16-bit units: identical for the XVF's 16-bit
+    # stream, within rounding for float sources the two paths convert differently.
+    lsb = lambda x: np.round(x * 32768).astype(np.int64)
+    ri, ti = lsb(ra), lsb(ta)
+    diffs = [int(np.abs(ti[k0 * block:(k0 + 1) * block] - ri[pos:pos + block]).max())]
+    splices = []
     for direction in (1, -1):
         offset = pos - k0 * block
         k = k0 + direction
@@ -864,7 +869,7 @@ def buffer_continuity(reference: Path, test: Path, sf: Any, np: Any, sig: Any, b
             if r < min_corr:
                 p, r = locate(k, exp - 400 * block, exp + 400 * block)
             if r >= min_corr:
-                exact += 1
+                diffs.append(int(np.abs(ti[k * block:(k + 1) * block] - ri[p:p + block]).max()))
                 step = (p - exp) * direction
                 if step:
                     # the splice sits between blocks k-1|k (forward) or k|k+1 (backward)
@@ -874,7 +879,10 @@ def buffer_continuity(reference: Path, test: Path, sf: Any, np: Any, sig: Any, b
     splices.sort(key=lambda x: x["test_frame"])
     missing = sum(x["frames_skipped"] for x in splices)
     return {
-        "comparable": True, "block": block, "test_frames": int(len(b)), "blocks": int(nb), "bit_exact_blocks": int(exact),
+        "comparable": True, "block": block, "test_frames": int(len(b)), "blocks": int(nb),
+        # unlocated blocks were recorded before/after the reference window, or altered
+        "located_blocks": len(diffs), "identical_blocks": int(sum(x == 0 for x in diffs)),
+        "within_1lsb_blocks": int(sum(x <= 1 for x in diffs)), "max_lsb_difference": int(max(diffs)),
         "splices": len(splices), "frames_missing": int(missing), "missing_seconds": missing / tfs,
         "all_multiples_of_block": all(x["frames_skipped"] % block == 0 for x in splices),
         "splice_positions_mod_block": sorted({x["test_frame"] % block for x in splices}),
@@ -1239,7 +1247,7 @@ def host_path_label(hp: dict[str, Any] | None) -> str:
     if not cont.get("comparable"):
         return f"{hp.get('classification', '?')}; continuity not comparable ({cont.get('reason', '')})"
     return (f"{hp.get('classification', '?')}; {cont['splices']} splices, {cont['frames_missing']} frames "
-            f"({cont['missing_seconds']:.2f} s) missing, {cont['bit_exact_blocks']}/{cont['blocks']} {cont['block']}-frame blocks bit-exact")
+            f"({cont['missing_seconds']:.2f} s) missing; {cont['identical_blocks']}/{cont['located_blocks']} located {cont['block']}-frame blocks identical")
 
 
 def generate_html_report(session: dict[str, Any], out_path: Path) -> None:
@@ -1413,7 +1421,7 @@ def generate_github_comment(session: dict[str, Any]) -> str:
         for t in host:
             hp = t["host_path_control"]
             cont = hp.get("continuity", {})
-            detail = (f"{cont['bit_exact_blocks']}/{cont['blocks']} blocks of {cont['block']} frames bit-exact; "
+            detail = (f"{cont['identical_blocks']}/{cont['located_blocks']} located blocks of {cont['block']} frames identical; "
                       f"{cont['splices']} splices ({cont['frames_missing']} frames missing), splice phases mod {cont['block']}: {cont['splice_positions_mod_block']}"
                       if cont.get("comparable") else cont.get("reason", hp.get("error", "n/a")))
             lines.append(f"| `{t['firmware']}` | `{t['route']}` | {hp.get('classification', hp.get('error', '?'))} | {detail} |")
@@ -1547,9 +1555,6 @@ def real_run(args: argparse.Namespace, script_dir: Path, np: Any, sig: Any, sf: 
     if not args.yes:
         input("\nPress ENTER to begin the firmware matrix... ")
 
-    host_ctl=host_control_ffmpeg() if args.host_control else None
-    if args.host_control:
-        print(f"[host] FFmpeg/AVFoundation control capture: {'enabled (device ' + host_ctl[1] + ')' if host_ctl else 'unavailable (needs macOS + ffmpeg)'}")
     tests=[]
     output_name: str|None=None
     for fw_label,fw_path,rate,fwsha in fwrows:
@@ -1566,6 +1571,10 @@ def real_run(args: argparse.Namespace, script_dir: Path, np: Any, sig: Any, sf: 
             # Indices can shift after the XVF re-enumerates; keep the same physical speaker.
             output_idx=find_output_by_name(sd,output_name)
         print(f"[audio] XVF input: [{input_idx}] {sd.query_devices(input_idx)['name']}")
+        # AVFoundation renumbers devices when the XVF re-enumerates, so look it up after every flash.
+        host_ctl=host_control_ffmpeg() if args.host_control else None
+        if args.host_control:
+            print(f"[host] FFmpeg/AVFoundation control capture: {'device ' + host_ctl[1] if host_ctl else 'unavailable (needs macOS + ffmpeg)'}")
 
         # Exact no-playback control, close to the maintainer's 20 s ALSA capture reproduction.
         ambient_route = ROUTES_48K[0] if rate == 48000 else ROUTES_16K[0]

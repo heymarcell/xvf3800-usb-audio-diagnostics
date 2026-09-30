@@ -265,7 +265,7 @@ def test_real_run_with_host_path_control(tmp_path, monkeypatch, rt, fake_sd, fak
     hp48 = tests[("v2.1.1_48k2ch", "normal")]["host_path_control"]
     cont = hp48["continuity"]
     assert cont["comparable"] and cont["splices"] > 10 and cont["all_multiples_of_block"]
-    assert cont["splice_positions_mod_block"] == [0] and cont["bit_exact_blocks"] >= cont["blocks"] - 2
+    assert cont["splice_positions_mod_block"] == [0] and cont["identical_blocks"] == cont["located_blocks"] >= cont["blocks"] - 2
     assert hp48["classification"] == PERIODIC
     hp16 = tests[("v2.1.1_native16k", "normal")]["host_path_control"]
     assert hp16["continuity"]["splices"] == 0 and hp16["classification"] == CLEAN

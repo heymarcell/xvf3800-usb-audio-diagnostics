@@ -256,7 +256,11 @@ def matrix_stage(out: Path, rt: Any) -> dict[str, Any]:
     sessions = sorted((out / "matrix").glob("xvf3800-diagnostic-*"))
     if rc != 0 or not sessions or not (sessions[-1] / "analysis.json").exists():
         return {"ok": False, "returncode": rc, "session": str(sessions[-1]) if sessions else None}
-    data = json.loads((sessions[-1] / "analysis.json").read_text())
+    return {"ok": True, "session": str(sessions[-1]), **matrix_summary(sessions[-1])}
+
+
+def matrix_summary(session: Path) -> dict[str, Any]:
+    data = json.loads((session / "analysis.json").read_text())
     rows = []
     for t in data["tests"]:
         ch = t["analysis"]["channels"]
@@ -264,8 +268,8 @@ def matrix_stage(out: Path, rt: Any) -> dict[str, Any]:
         rows.append({"firmware": t["firmware"], "route": t["route"], "result": d.classify_test(t),
                      "periodicity": [d.fold_label(c) for c in ch], "signature": d.upsampling_label(ch[0]) if ch else "-",
                      "host_path": d.host_path_label(hp) if hp else None,
-                     "host_path_continuity": {k: v for k, v in (hp.get("continuity") or {}).items() if k != "first_splices"} or None})
-    return {"ok": True, "session": str(sessions[-1]), "tests": rows}
+                     "host_path_continuity": {k: v for k, v in (hp.get("continuity") or {}).items() if k not in ("first_splices", "splice_list")} or None})
+    return {"tests": rows}
 
 
 def find_builtin_mic(sd: Any) -> int | None:
@@ -363,11 +367,11 @@ def render_summary(results: dict[str, Any]) -> str:
     ab = [t for t in trials if t["kind"] == "ab"]
     if ab:
         L += ["", "## Same input, captured through FFmpeg/AVFoundation and directly at the same time", "",
-              "| Trial | Blocks bit-exact | Splices | Audio missing | Splice phase mod 512 | FFmpeg recording | Direct recording |", "|---|---|---|---|---|---|---|"]
+              "| Trial | Located blocks identical (≤1 LSB) | Splices | Audio missing | Splice phase mod 512 | FFmpeg recording | Direct recording |", "|---|---|---|---|---|---|---|"]
         for t in ab:
             c = t.get("continuity", {})
             if c.get("comparable"):
-                L.append(f"| {t['name']} | {c['bit_exact_blocks']}/{c['blocks']} | {c['splices']} | {c['missing_pct']:.1f}% | {c['splice_positions_mod_block']} | "
+                L.append(f"| {t['name']} | {c['identical_blocks']}/{c['located_blocks']} ({c['within_1lsb_blocks']}) | {c['splices']} | {c['missing_pct']:.1f}% | {c['splice_positions_mod_block']} | "
                          f"{t['ffmpeg']['classification']} | {t['direct']['classification']} |")
             else:
                 L.append(f"| {t['name']} | – | – | – | – | {t.get('error') or c.get('reason', '?')} | |")
@@ -384,6 +388,34 @@ def render_summary(results: dict[str, Any]) -> str:
     return "\n".join(L) + "\n"
 
 
+def rebuild_report(out: Path) -> int:
+    """Re-run the analysis of a finished validation from its recordings (no hardware, no audio)."""
+    np, sig, sd, sf = d.import_runtime()
+    results = json.loads((out / "results.json").read_text(encoding="utf-8"))
+    m = results["stages"].get("matrix", {})
+    if m.get("session"):
+        d.reanalyze(Path(m["session"]), np, sig, sf)
+        results["stages"]["matrix"] = {**m, **matrix_summary(Path(m["session"]))}
+    for t in results["stages"].get("hostpath", {}).get("trials", []):
+        tdir = Path(t["dir"])
+        t.pop("stats", None)
+        if t["kind"] == "ab" and (tdir / "ffmpeg.wav").exists() and (tdir / "direct.wav").exists():
+            mic = t["name"].startswith("builtin_mic")
+            cont = d.buffer_continuity(tdir / "direct.wav", tdir / "ffmpeg.wav", sf, np, sig, min_corr=0.999 if mic else 0.9999)
+            if cont.get("comparable"):
+                cont["missing_pct"] = 100 * cont["frames_missing"] / (cont["test_frames"] + cont["frames_missing"])
+            t.update(continuity=cont, ffmpeg=channel_summary(tdir / "ffmpeg.wav", np, sf), direct=channel_summary(tdir / "direct.wav", np, sf))
+        elif t["kind"] == "duration" and (tdir / "ffmpeg.wav").exists():
+            t["ffmpeg"] = channel_summary(tdir / "ffmpeg.wav", np, sf)
+    results["rebuilt_with"] = d.APP_VERSION
+    import validation_report
+    validation_report.render(results, out)
+    (out / "results.json").write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
+    (out / "SUMMARY.md").write_text(render_summary(results), encoding="utf-8")
+    print(f"Rebuilt: {out / 'report.html'}")
+    return 0
+
+
 # --- main -------------------------------------------------------------------------------------
 
 def main() -> int:
@@ -394,10 +426,13 @@ def main() -> int:
     ap.add_argument("--trials", type=int, default=3, help="concurrent FFmpeg/direct trials per FFmpeg build on 48 kHz")
     ap.add_argument("--trial-seconds", type=float, default=40.0)
     ap.add_argument("--stop", action="store_true", help="stop a running validation immediately")
+    ap.add_argument("--rebuild-report", metavar="VALIDATION_DIR", help="recompute analysis and reports of a finished run from its recordings")
     args = ap.parse_args()
     if args.stop:
         return stop_running()
     d.bootstrap_venv(Path(__file__).resolve(), root=REPO, extra_deps=("pytest>=8,<10",))
+    if args.rebuild_report:
+        return rebuild_report(Path(args.rebuild_report).resolve())
 
     stages = SILENT_STAGES if args.silent else [s.strip() for s in args.stages.split(",") if s.strip()]
     unknown = set(stages) - set(STAGES)

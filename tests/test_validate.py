@@ -26,7 +26,8 @@ def test_stop_without_a_run(monkeypatch, tmp_path, capsys):
 
 def test_render_summary():
     v = load()
-    cont = {"comparable": True, "bit_exact_blocks": 3332, "blocks": 3336, "splices": 413, "missing_pct": 11.0, "splice_positions_mod_block": [0]}
+    cont = {"comparable": True, "identical_blocks": 3332, "located_blocks": 3332, "within_1lsb_blocks": 3332, "blocks": 3336, "splices": 413,
+            "missing_pct": 11.0, "splice_positions_mod_block": [0]}
     results = {
         "started": "20260930-120000", "env": {"platform": "macOS", "python": "3.14", "system_ffmpeg": {"version": "ffmpeg version 8.1.1"}},
         "firmware_before": "v2.1.1_native16k", "firmware_after": "v2.1.1_native16k", "errors": [],
@@ -45,7 +46,7 @@ def test_render_summary():
     }
     md = v.render_summary(results)
     assert "| unit | ✅ 120 passed |" in md
-    assert "| xvf48k_homebrew_ab1 | 3332/3336 | 413 | 11.0% | [0] | periodic | clean |" in md
+    assert "| xvf48k_homebrew_ab1 | 3332/3332 (3332) | 413 | 11.0% | [0] | periodic | clean |" in md
     assert "| xvf48k_homebrew_duration30 | 30 s | 26.700 s | 11.0% | periodic |" in md
     assert "ffmpeg produced no recording" in md and "v2.1.1_native16k / v2.1.1_native16k" in md
 

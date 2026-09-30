@@ -170,17 +170,21 @@ def group_table(trials: list[dict[str, Any]]) -> str:
         spm = [t["stats"]["splices_per_min"] for t in ok if "stats" in t]
         ivl = [t["stats"]["interval_ms_median"] for t in ok if "interval_ms_median" in t.get("stats", {})]
         jx = [t["stats"]["splice_jump_x_typical"] for t in ok if "splice_jump_x_typical" in t.get("stats", {})]
-        exact = sum(t["continuity"]["bit_exact_blocks"] for t in ok), sum(t["continuity"]["blocks"] for t in ok)
+        exact = sum(t["continuity"]["identical_blocks"] for t in ok), sum(t["continuity"]["located_blocks"] for t in ok)
+        near = sum(t["continuity"]["within_1lsb_blocks"] for t in ok)
         phases = sorted({p for t in ok for p in t["continuity"]["splice_positions_mod_block"]})
         ff_flag = sum(t.get("ffmpeg", {}).get("classification") == d.PERIODIC for t in ts)
         di_flag = sum(t.get("direct", {}).get("classification") == d.PERIODIC for t in ts)
         rows.append(f"<tr><td>{esc(label_of(g))}</td><td>{len(ok)}/{len(ts)}</td><td>{mean_sd(miss)}</td><td>{mean_sd(spm)}</td><td>{mean_sd(ivl)}</td>"
-                    f"<td>{mean_sd(jx)}</td><td>{exact[0]}/{exact[1]}</td><td>{esc(phases) if phases else '–'}</td><td>{ff_flag}/{len(ts)}</td><td>{di_flag}/{len(ts)}</td></tr>")
+                    f"<td>{mean_sd(jx)}</td><td>{exact[0]}/{exact[1]} ({near} within 1 LSB)</td><td>{esc(phases) if phases else '–'}</td><td>{ff_flag}/{len(ts)}</td><td>{di_flag}/{len(ts)}</td></tr>")
     if not rows:
         return ""
     return ("<table><thead><tr><th>Input · FFmpeg</th><th>Trials compared</th><th>Audio missing %</th><th>Splices / min</th><th>Median time between splices (ms)</th>"
-            "<th>Jump at a splice ÷ typical step</th><th>Blocks bit-exact</th><th>Splice phases mod 512</th><th>FFmpeg flagged periodic</th><th>Direct flagged periodic</th></tr></thead>"
-            f"<tbody>{''.join(rows)}</tbody></table><p class='muted'>Mean ± sample standard deviation across trials.</p>")
+            "<th>Jump at a splice ÷ typical step</th><th>Located blocks identical</th><th>Splice phases mod 512</th><th>FFmpeg flagged periodic</th><th>Direct flagged periodic</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table><p class='muted'>Mean ± sample standard deviation across trials. Every 512-frame block of the FFmpeg recording "
+            "that can be located in the direct capture is compared sample by sample; blocks FFmpeg recorded before the direct capture started or after it "
+            "stopped cannot be located. The built-in microphone delivers float samples that the two paths round to 16 bits separately, so its blocks agree "
+            "within 1 LSB rather than exactly.</p>")
 
 
 def verdict(trials: list[dict[str, Any]]) -> str:
@@ -192,13 +196,15 @@ def verdict(trials: list[dict[str, Any]]) -> str:
     for g, ts in groups.items():
         miss = [t["continuity"]["missing_pct"] for t in ts]
         phases = sorted({p for t in ts for p in t["continuity"]["splice_positions_mod_block"]})
-        exact = sum(t["continuity"]["bit_exact_blocks"] for t in ts), sum(t["continuity"]["blocks"] for t in ts)
+        exact = sum(t["continuity"]["identical_blocks"] for t in ts), sum(t["continuity"]["located_blocks"] for t in ts)
+        near = sum(t["continuity"]["within_1lsb_blocks"] for t in ts)
         di_flag = sum(t["direct"]["classification"] == d.PERIODIC for t in ts)
+        match = f"{exact[0]}/{exact[1]} located blocks identical to the direct capture" if exact[0] == exact[1] or exact[0] else f"{near}/{exact[1]} located blocks within 1 LSB of the direct capture"
         if max(miss) == 0:
-            lines.append(f"<li><b>{esc(label_of(g))}</b>: no audio missing in {len(ts)} trial(s); {exact[0]}/{exact[1]} blocks bit-exact.</li>")
+            lines.append(f"<li><b>{esc(label_of(g))}</b>: no audio missing in {len(ts)} trial(s); {match}.</li>")
         else:
             lines.append(f"<li><b>{esc(label_of(g))}</b>: {mean_sd(miss)} % of the audio missing across {len(ts)} trial(s), whole 512-frame buffers only "
-                         f"(splice phases {esc(phases)}); {exact[0]}/{exact[1]} delivered blocks bit-exact with the direct capture, which was flagged periodic in {di_flag}/{len(ts)}.</li>")
+                         f"(splice phases {esc(phases)}); {match}, which was flagged periodic in {di_flag}/{len(ts)}.</li>")
     return f"<ul>{''.join(lines)}</ul>" if lines else ""
 
 
@@ -212,7 +218,8 @@ def duration_chart(trials: list[dict[str, Any]]) -> str:
     ax.barh(names, [t["held_s"] for t in dur], color=DIRECT_COLOR, label="audio in the file")
     for i, t in enumerate(dur):
         ax.text(t["requested_s"], i, f"  {t['missing_pct']:.1f}% missing", va="center", fontsize=8)
-    ax.invert_yaxis(); ax.set(xlabel="seconds"); ax.legend(loc="lower right"); ax.grid(alpha=.2, axis="x")
+    ax.invert_yaxis(); ax.set(xlabel="seconds", xlim=(0, max(t["requested_s"] for t in dur) * 1.18)); ax.grid(alpha=.2, axis="x")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.35 if len(dur) < 4 else -0.18), ncol=2, frameon=False)
     rows = "".join(f"<tr><td>{esc(t['name'])}</td><td>{t['requested_s']:.0f} s</td><td>{t['held_s']:.3f} s</td><td>{t['missing_pct']:.1f}%</td>"
                    f"<td>{esc(t['ffmpeg']['classification'])}</td></tr>" for t in dur)
     return (png(fig) + "<table><thead><tr><th>Trial</th><th>Requested</th><th>Audio held</th><th>Missing</th><th>Recording</th></tr></thead>"
@@ -253,7 +260,9 @@ def render(results: dict[str, Any], out: Path) -> Path:
             trial_sections.append(f"<section>{head}<p>{esc(t.get('error') or cont.get('reason', 'not comparable'))}</p></section>")
             continue
         st = t.get("stats", {})
-        facts = (f"<p>{cont['bit_exact_blocks']}/{cont['blocks']} blocks bit-exact · {cont['splices']} splices · {cont['frames_missing']} frames "
+        facts = (f"<p>{cont['identical_blocks']}/{cont['located_blocks']} located blocks identical ({cont['within_1lsb_blocks']} within 1 LSB, largest difference "
+                 f"{cont['max_lsb_difference']} LSB; {cont['blocks'] - cont['located_blocks']} of {cont['blocks']} blocks recorded outside the direct capture) · "
+                 f"{cont['splices']} splices · {cont['frames_missing']} frames "
                  f"({cont['missing_pct']:.2f}%) missing · splices/min {st.get('splices_per_min', 0):.0f} · run lengths (buffers: count) {esc(st.get('run_lengths', {}))} · "
                  f"jump at a splice {st.get('splice_jump_x_typical', 0):.1f}× the typical step</p>"
                  f"<p>FFmpeg recording: <b>{esc(t['ffmpeg']['classification'])}</b> ({esc(' | '.join(t['ffmpeg']['periodicity']))})<br>"
