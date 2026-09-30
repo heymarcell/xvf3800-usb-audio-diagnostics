@@ -115,6 +115,16 @@ def test_ensure_dfu_util_windows_download(tmp_path, monkeypatch):
     assert diagnose.ensure_dfu_util(tmp_path) == exe
 
 
+def test_windows_dfu_util_choice_ignores_listing_order(tmp_path):
+    for arch in ("win32", "win64", "aarch64"):
+        (tmp_path / arch).mkdir()
+        (tmp_path / arch / "dfu-util.exe").write_text(arch)
+    assert diagnose.find_windows_dfu_util(tmp_path) == tmp_path / "win64" / "dfu-util.exe"
+    (tmp_path / "win64" / "dfu-util.exe").unlink()
+    assert diagnose.find_windows_dfu_util(tmp_path) == tmp_path / "aarch64" / "dfu-util.exe"
+    assert diagnose.find_windows_dfu_util(tmp_path / "missing") is None
+
+
 def test_ensure_dfu_util_mac_without_homebrew(monkeypatch):
     monkeypatch.setattr(diagnose.shutil, "which", lambda name: None)
     monkeypatch.setattr(diagnose.platform, "system", lambda: "Darwin")

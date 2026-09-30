@@ -254,6 +254,12 @@ def locate_xvf_host(repo: Path) -> list[str]:
         raise RuntimeError(f"Official portable xvf_host.py not found: {portable}")
     return [sys.executable, str(portable)]
 
+def find_windows_dfu_util(tools: Path) -> Path | None:
+    # The release tarball ships win32 and win64 builds; always pick the same one.
+    found = sorted(tools.rglob("dfu-util.exe")) if tools.exists() else []
+    return next((p for p in found if "win64" in str(p).lower()), found[0] if found else None)
+
+
 def ensure_dfu_util(cache: Path) -> str:
     found = shutil.which("dfu-util")
     if found:
@@ -261,7 +267,7 @@ def ensure_dfu_util(cache: Path) -> str:
     sysname = platform.system()
     if sysname == "Windows":
         tools = cache / "dfu-util-win"
-        exe = next(tools.rglob("dfu-util.exe"), None) if tools.exists() else None
+        exe = find_windows_dfu_util(tools)
         if not exe:
             print("[setup] Downloading official dfu-util Windows binary...", flush=True)
             archive = cache / "dfu-util-0.11-binaries.tar.xz"
@@ -273,8 +279,7 @@ def ensure_dfu_util(cache: Path) -> str:
                     tf.extractall(tools, filter="data")
                 else:
                     tf.extractall(tools)
-            candidates = [p for p in tools.rglob("dfu-util.exe") if "win64" in str(p).lower()]
-            exe = candidates[0] if candidates else next(tools.rglob("dfu-util.exe"), None)
+            exe = find_windows_dfu_util(tools)
         if not exe:
             raise RuntimeError("Could not locate dfu-util.exe after download")
         return str(exe)
