@@ -110,9 +110,9 @@ def main():
         if args.COMMAND == "VERSION":
             result = [2, 1, 0] if fw.startswith("v2.1.0") else [2, 1, 1]
         elif args.COMMAND == "BLD_MSG":
-            result = [fw]
+            result = fw  # upstream iterates char strings, printing ['v', '2', ...]
         elif args.COMMAND == "BLD_REPO_HASH":
-            result = ["0" * 40]
+            result = "0" * 40
         else:
             result = regs.get(args.COMMAND, DEFAULTS[args.COMMAND])
         print(f"ReadCMD: cmdid: 0, resid: 0, payload: {result}")

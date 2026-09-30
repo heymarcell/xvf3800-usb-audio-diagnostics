@@ -24,13 +24,6 @@ def sha256(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-def locate(src: Path, name: str) -> Path | None:
-    # Runs from diagnose.py < 1.1.1 only wrote github_comment.md inside share/.
-    for p in (src / name, src / "share" / name):
-        if p.is_file():
-            return p
-    return None
-
 def main() -> int:
     ap = argparse.ArgumentParser(description="Publish a compact diagnostic run into results/issue-39")
     ap.add_argument("run_dir")
@@ -39,7 +32,7 @@ def main() -> int:
     src = Path(args.run_dir).expanduser().resolve()
     if not src.is_dir():
         raise SystemExit(f"Run directory not found: {src}")
-    found = [(name, p) for name in PREFERRED if (p := locate(src, name))]
+    found = [(name, src / name) for name in PREFERRED if (src / name).is_file()]
     if not found:
         raise SystemExit("No expected report artifacts found in the run directory")
     dest = Path(args.dest_root).expanduser().resolve() / src.name

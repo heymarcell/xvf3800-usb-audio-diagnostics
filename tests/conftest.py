@@ -113,8 +113,10 @@ class FakeStream:
             y[a:a + m, 0] += 0.5 * x[:m]
             y[a:a + m, 1] += 0.45 * x[:m]
         if self.sd.click_bug_active():
+            # steps at 1 in 40 randomly chosen 512-frame boundaries (phase 511)
+            nblk = (n - 1) // 512
+            at = 511 + 512 * np.sort(np.random.default_rng(nblk).choice(nblk, size=max(4, nblk // 40), replace=False))
             steps = np.zeros(n)
-            at = np.arange(511, n - 1, 512 * 40)
             steps[at] = np.where(np.arange(len(at)) % 2 == 0, 1.0, -1.0)
             y[:, 1] += 0.4 * np.cumsum(steps)
         y = np.clip(y, -1.0, 0.99997)
@@ -198,8 +200,10 @@ class FakeSoundDevice:
         self.check_input_settings(device, channels, dtype, samplerate)
         return FakeStream(self, samplerate, channels, callback)
 
-    def play(self, data, samplerate, device, blocking):
-        assert blocking
+    def stop(self):
+        pass
+
+    def play(self, data, samplerate, device, blocking=False):
         self.check_output_settings(device, 1, "float32", samplerate)
         self.plays.append({"device": self.devices[device]["name"], "rate": int(samplerate),
                            "start": self.clock.t, "data": np.asarray(data, dtype=np.float64)})

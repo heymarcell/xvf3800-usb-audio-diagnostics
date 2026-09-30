@@ -1,4 +1,4 @@
-firmware,route,sample_rate,classification,ch0_jumps_gt_020,ch1_jumps_gt_020,ch0_512_phase,ch1_512_phase,ch0_512_concentration,ch1_512_concentration,alignment_score
-v2.1.1_48k2ch,normal,48000,periodic discontinuity signature,450,308,511,511,0.49333333333333335,0.7207792207792207,0.9966755584761932
-v2.1.1_48k2ch,raw,48000,no strong periodic-click signature,230,87,42,102,0.013043478260869565,0.022988505747126436,0.9999993633860906
-v2.1.1_native16k,normal,16000,no strong periodic-click signature,449,315,3,93,0.008908685968819599,0.012698412698412698,0.9999993560086211
+firmware,route,sample_rate,classification,ch0_periodicity,ch1_periodicity,ch0_48k_signature,host_path_classification,host_path_splices,host_path_frames_missing,ch0_jumps_gt_020,ch1_jumps_gt_020,playback_start_s,alignment_score
+v2.1.1_48k2ch,normal,48000,periodic discontinuity signature,"P=512 phase 511: x2.25, z=46.2, sharp; 12/12 largest jumps there","P=512 phase 511: x2.79, z=65.7, sharp; 12/12 largest jumps there",full-band,,,,449,307,0.75,0.9999945102851988
+v2.1.1_48k2ch,raw,48000,no strong periodic-click signature,"none (strongest P=960: x1.37, z=6.1)","none (strongest P=960: x1.37, z=6.1)",full-band,,,,230,87,0.75,0.9999999909092974
+v2.1.1_native16k,normal,16000,no strong periodic-click signature,"none (strongest P=2048: x1.30, z=5.0)","none (strongest P=2048: x1.30, z=5.0)",native 16 kHz,,,,449,315,0.75,0.9999999907361887

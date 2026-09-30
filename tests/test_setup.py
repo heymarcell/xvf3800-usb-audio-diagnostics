@@ -20,6 +20,7 @@ def test_firmware_table_is_well_formed():
         assert len(meta["sha256"]) == 64 and int(meta["sha256"], 16) >= 0
         assert meta["rel"].startswith("xmos_firmwares/usb/") and meta["rel"].endswith(".bin")
         assert meta["rate"] in (16000, 48000)
+        assert len(meta["version"]) == 3
 
 
 def make_archive(path, commit: str):

@@ -14,7 +14,7 @@ def test_fixture_hash_matches_every_record():
     assert actual == EXPECTED_SHA
     assert (VOICE_DIR / "SHA256SUMS.txt").read_text(encoding="utf-8").split() == [EXPECTED_SHA, "xvf3800-test-vo.wav"]
     assert json.loads((VOICE_DIR / "provenance.json").read_text(encoding="utf-8"))["sha256"] == EXPECTED_SHA
-    for doc in ("README.md", "PUBLISHING.md", "assets/voice/README.md"):
+    for doc in ("README.md", "assets/voice/README.md"):
         assert EXPECTED_SHA in (REPO_ROOT / doc).read_text(encoding="utf-8"), doc
 
 
@@ -32,13 +32,6 @@ def test_provenance_matches_wav_header():
     assert (VOICE_DIR / prov["voice_design"]["prompt_file"]).is_file()
 
 
-def test_embedded_script_matches_committed_script():
-    assert (VOICE_DIR / "script.txt").read_text(encoding="utf-8") == diagnose.VOICE_SCRIPT + "\n"
-
-
-def test_write_assets_restores_missing_script(tmp_path):
-    diagnose.write_assets(tmp_path)
-    assert (tmp_path / "assets" / "voice" / "script.txt").read_text(encoding="utf-8") == diagnose.VOICE_SCRIPT + "\n"
-    (tmp_path / "assets" / "voice" / "script.txt").write_text("keep", encoding="utf-8")
-    diagnose.write_assets(tmp_path)
-    assert (tmp_path / "assets" / "voice" / "script.txt").read_text(encoding="utf-8") == "keep"
+def test_script_text_is_present():
+    text = (VOICE_DIR / "script.txt").read_text(encoding="utf-8")
+    assert text.startswith("Just before dawn, Mara") and text.endswith("continued toward the other side.\n")

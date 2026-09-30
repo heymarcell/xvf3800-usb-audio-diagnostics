@@ -31,7 +31,9 @@ def test_simulation_detects_injected_phase_511(simulated):
     got = {(r["firmware"], r["route"]): r for r in rows}
     bad = got[("v2.1.1_48k2ch", "normal")]
     assert bad["classification"] == PERIODIC
-    assert bad["ch0_512_phase"] == bad["ch1_512_phase"] == "511"
+    assert bad["ch0_periodicity"].startswith("P=512 phase 511") and bad["ch1_periodicity"].startswith("P=512 phase 511")
+    assert ", sharp;" in bad["ch1_periodicity"]
+    assert got[("v2.1.1_48k2ch", "raw")]["ch0_48k_signature"] == "full-band"
     assert got[("v2.1.1_48k2ch", "raw")]["classification"] == CLEAN
     assert got[("v2.1.1_native16k", "normal")]["classification"] == CLEAN
     assert all(float(r["alignment_score"]) > 0.99 for r in rows)
@@ -55,6 +57,18 @@ def import_run(*args):
                           capture_output=True, text=True)
 
 
+def test_reanalyze_rebuilds_outputs_from_recordings(simulated, tmp_path, rt):
+    import shutil
+    copy = tmp_path / simulated.name
+    shutil.copytree(simulated, copy)  # relative recording paths keep a moved session usable
+    for f in ("report.html", "summary.csv", "github-share-bundle.zip"):
+        (copy / f).unlink()
+    diagnose.reanalyze(copy, rt.np, rt.sig, rt.sf)
+    assert (copy / "summary.csv").read_text() == (simulated / "summary.csv").read_text()
+    assert json.loads((copy / "analysis.json").read_text())["analyzed_with"] == diagnose.APP_VERSION
+    assert (copy / "report.html").is_file() and (copy / "github-share-bundle.zip").is_file()
+
+
 def test_import_run_publishes_hashed_evidence(simulated, tmp_path):
     proc = import_run(simulated, "--dest-root", tmp_path)
     assert proc.returncode == 0, proc.stderr
@@ -67,15 +81,6 @@ def test_import_run_publishes_hashed_evidence(simulated, tmp_path):
         assert f["sha256"] in (dest / "README.md").read_text(encoding="utf-8")
     again = import_run(simulated, "--dest-root", tmp_path)
     assert again.returncode == 1 and "Already imported" in again.stderr and "Traceback" not in again.stderr
-
-
-def test_import_run_accepts_legacy_layout(simulated, tmp_path):
-    legacy = tmp_path / "xvf3800-diagnostic-legacy"
-    (legacy / "share").mkdir(parents=True)
-    (legacy / "report.html").write_text("r")
-    (legacy / "share" / "github_comment.md").write_text("c")
-    assert import_run(legacy, "--dest-root", tmp_path / "out").returncode == 0
-    assert (tmp_path / "out" / legacy.name / "github_comment.md").read_text() == "c"
 
 
 def test_import_run_errors(tmp_path):
@@ -117,7 +122,9 @@ def test_real_run_against_emulated_hardware(tmp_path, monkeypatch, rt, fake_sd, 
     monkeypatch.setattr(diagnose, "ensure_repo", lambda cache: fake_repo)
     monkeypatch.setattr(diagnose, "ensure_dfu_util", lambda cache: fake_dfu)
     monkeypatch.setattr(diagnose, "locate_xvf_host", lambda repo: host_cmd)
-    args = argparse.Namespace(output=str(tmp_path / "runs"), voice=str(short_voice), output_device=None, deep=True)
+    # Behave like macOS dfu-util 0.11: non-zero exit after every successful flash.
+    xvf_state.write_text(json.dumps({**json.loads(xvf_state.read_text()), "reset_exit": 251}))
+    args = argparse.Namespace(output=str(tmp_path / "runs"), voice=str(short_voice), output_device=None, deep=True, yes=False, host_control=False)
 
     sess = diagnose.real_run(args, tmp_path, rt.np, rt.sig, rt.sf, fake_sd)
 
@@ -128,7 +135,8 @@ def test_real_run_against_emulated_hardware(tmp_path, monkeypatch, rt, fake_sd, 
     routes = {r["name"]: r for r in diagnose.ROUTES_48K}
     for t in analysis["tests"]:
         assert t["xvf_before"]["VERSION"] == version[t["firmware"]]
-        assert t["xvf_before"]["BLD_MSG"] == f"BLD_MSG: ['{t['firmware']}']"
+        assert t["xvf_before"]["BLD_MSG"] == f"BLD_MSG: '{t['firmware']}'"
+        assert t["recording_path"] == f"recordings/{t['firmware']}__{t['route']}.wav"
         assert t["analysis"]["sample_rate"] == (16000 if "16k" in t["firmware"] else 48000)
         route = routes[t["route"].replace("_ambient", "")]
         assert t["xvf_before"]["AUDIO_MGR_OP_L"] == "AUDIO_MGR_OP_L: [{}, {}]".format(*route["left"])
@@ -140,7 +148,7 @@ def test_real_run_against_emulated_hardware(tmp_path, monkeypatch, rt, fake_sd, 
     # One PortAudio rescan per reflash, and the same physical speaker despite index shifts.
     assert fake_sd.inits == 3
     assert {p["device"] for p in fake_sd.plays} == {FakeSoundDevice.SPEAKER}
-    assert len(prompts) == 4  # pre-flight + one DFU prompt per firmware
+    assert len(prompts) == 1  # pre-flight only: the fake exposes DFU while running
 
     flashes = [c for c in read_log(xvf_state.with_suffix(".dfu.log")) if "-D" in c]
     assert [c[:5] for c in flashes] == [["-R", "-e", "-a", "1", "-D"]] * 3
@@ -151,6 +159,7 @@ def test_real_run_against_emulated_hardware(tmp_path, monkeypatch, rt, fake_sd, 
     assert all(c[1] == "--values" for c in host_calls if len(c) > 1)
 
     session = json.loads((sess / "session.json").read_text())
+    assert not any(str(tmp_path) in json.dumps(v) for v in (session, analysis)), "no local absolute paths"
     assert session["firmware_order"] == ["v2.1.0_48k2ch", "v2.1.1_48k2ch", "v2.1.1_native16k"]
     assert session["environment"]["respeaker_repo_commit"] == diagnose.RESPEAKER_REPO_COMMIT
     assert SESSION_FILES <= {p.name for p in sess.iterdir()}
@@ -170,7 +179,7 @@ def test_real_run_without_portaudio_refresh_would_fail(tmp_path, monkeypatch, rt
     monkeypatch.setattr(diagnose, "routes_for", lambda *a: [])
     real_wait = diagnose.wait_for_audio_input
     monkeypatch.setattr(diagnose, "wait_for_audio_input", lambda sd, rate: real_wait(sd, rate, timeout_s=0.2))
-    args = argparse.Namespace(output=str(tmp_path / "runs"), voice=str(short_voice), output_device=None, deep=False)
+    args = argparse.Namespace(output=str(tmp_path / "runs"), voice=str(short_voice), output_device=None, deep=False, yes=True, host_control=False)
     with pytest.raises(RuntimeError, match="did not become available at 16000 Hz: Invalid sample rate 16000"):
         diagnose.real_run(args, tmp_path, rt.np, rt.sig, rt.sf, fake_sd)
 
@@ -181,7 +190,7 @@ def test_real_run_without_portaudio_refresh_would_fail(tmp_path, monkeypatch, rt
 def cli(monkeypatch, rt):
     sd = FakeSoundDevice()
     monkeypatch.setattr(diagnose, "bootstrap_venv", lambda path: None)
-    monkeypatch.setattr(diagnose, "import_runtime", lambda: (rt.np, rt.sig, None, sd, rt.sf))
+    monkeypatch.setattr(diagnose, "import_runtime", lambda: (rt.np, rt.sig, sd, rt.sf))
 
     def main(*argv):
         monkeypatch.setattr(sys, "argv", ["diagnose.py", *map(str, argv)])
@@ -203,7 +212,72 @@ def test_cli_make_stimulus_uses_canonical_voice(cli, tmp_path, capsys):
     assert any(s["name"] == "english_voice" for s in manifest["segments"])
 
 
+def test_resolve_voice(tmp_path, capsys):
+    assert diagnose.resolve_voice(None, REPO_ROOT) == (REPO_ROOT / "assets/voice/xvf3800-test-vo.wav").resolve()
+    assert "Using repository test VO: assets/voice/xvf3800-test-vo.wav" in capsys.readouterr().out
+    assert diagnose.resolve_voice(None, tmp_path) is None
+    with pytest.raises(RuntimeError, match="Voice file not found"):
+        diagnose.resolve_voice(str(tmp_path / "nope.wav"), REPO_ROOT)
+
+
 def test_voice_fixture_path_is_repo_relative():
     info = diagnose.voice_fixture_info(REPO_ROOT / "assets" / "voice" / "xvf3800-test-vo.wav")
     assert info["path"] == "assets/voice/xvf3800-test-vo.wav"
     assert diagnose.voice_fixture_info(None) is None
+
+
+# --- host capture-path control ----------------------------------------------------------
+
+class DroppingHostCapture:
+    """Behaves like FFmpeg/AVFoundation at 48 kHz: the stream it records is the direct capture
+    with random whole 512-frame buffers missing (and it starts a little earlier)."""
+    instances = []
+
+    def __init__(self, ffmpeg, index, out_wav):
+        self.out_wav = out_wav
+        DroppingHostCapture.instances.append(self)
+
+    def stop(self):
+        import soundfile as sf
+        rec = self.out_wav.with_name(self.out_wav.name.replace("__ffmpeg", ""))
+        x, fs = sf.read(str(rec), always_2d=True)
+        if fs == 48000:
+            keep = np.random.default_rng(3).random(len(x) // 512) > 0.12
+            x = np.concatenate([x[k * 512:(k + 1) * 512] for k in range(len(x) // 512) if keep[k]])
+        sf.write(str(self.out_wav), x, fs, subtype="PCM_16")
+        return {"tool": "fake ffmpeg", "returncode": 0, "stderr": ""}
+
+
+def test_real_run_with_host_path_control(tmp_path, monkeypatch, rt, fake_sd, fake_repo, fake_dfu, host_cmd, short_voice):
+    monkeypatch.setattr("builtins.input", lambda msg="": "")
+    monkeypatch.setattr(diagnose, "ensure_repo", lambda cache: fake_repo)
+    monkeypatch.setattr(diagnose, "ensure_dfu_util", lambda cache: fake_dfu)
+    monkeypatch.setattr(diagnose, "locate_xvf_host", lambda repo: host_cmd)
+    monkeypatch.setattr(diagnose, "host_control_ffmpeg", lambda: ("ffmpeg", "6"))
+    monkeypatch.setattr(diagnose, "HostPathCapture", DroppingHostCapture)
+    DroppingHostCapture.instances = []
+    args = argparse.Namespace(output=str(tmp_path / "runs"), voice=str(short_voice), output_device=None, deep=False, yes=True, host_control=True)
+
+    sess = diagnose.real_run(args, tmp_path, rt.np, rt.sig, rt.sf, fake_sd)
+
+    tests = {(t["firmware"], t["route"]): t for t in json.loads((sess / "analysis.json").read_text())["tests"]}
+    assert len(DroppingHostCapture.instances) == 2  # the "normal" route of each firmware
+    hp48 = tests[("v2.1.1_48k2ch", "normal")]["host_path_control"]
+    cont = hp48["continuity"]
+    assert cont["comparable"] and cont["splices"] > 10 and cont["all_multiples_of_block"]
+    assert cont["splice_positions_mod_block"] == [0] and cont["bit_exact_blocks"] >= cont["blocks"] - 2
+    assert hp48["classification"] == PERIODIC
+    hp16 = tests[("v2.1.1_native16k", "normal")]["host_path_control"]
+    assert hp16["continuity"]["splices"] == 0 and hp16["classification"] == CLEAN
+    assert "host_path_control" not in tests[("v2.1.1_48k2ch", "raw")]
+    comment = (sess / "github_comment.md").read_text()
+    assert "FFmpeg/AVFoundation" in comment and "buffers dropped on the host side" in comment
+    with zipfile.ZipFile(sess / "github-share-bundle.zip") as zf:
+        assert "v2.1.1_48k2ch__normal__ffmpeg.flac" in zf.namelist()
+    rows = {(r["firmware"], r["route"]): r for r in csv.DictReader((sess / "summary.csv").open())}
+    assert int(rows[("v2.1.1_48k2ch", "normal")]["host_path_splices"]) == cont["splices"]
+    # a reanalysis recomputes the control from the stored recordings
+    before = cont["splices"]
+    diagnose.reanalyze(sess, rt.np, rt.sig, rt.sf)
+    again = json.loads((sess / "analysis.json").read_text())["tests"]
+    assert next(t for t in again if t["route"] == "normal" and "48k" in t["firmware"])["host_path_control"]["continuity"]["splices"] == before

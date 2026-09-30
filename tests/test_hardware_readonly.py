@@ -27,7 +27,7 @@ def test_version_is_readable(host_cmd):
 def test_snapshot_parses_every_value(host_cmd):
     snap = diagnose.snapshot_xvf(host_cmd)
     for cmd, line in snap.items():
-        assert line.startswith(cmd + ": ["), (cmd, line)
+        assert line.startswith(cmd + ": ") and not line.startswith(cmd + ": ['"), (cmd, line)
 
 
 def test_audio_input_matches_firmware_rate():

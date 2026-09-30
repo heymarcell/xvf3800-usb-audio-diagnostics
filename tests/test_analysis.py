@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import diagnose
+from diagnose import CLEAN, PERIODIC
 
 
 def stepped(n: int, every: int = 512 * 40, amp: float = 0.4, phase: int = 511, noise: float = 1e-3, seed: int = 0):
@@ -20,25 +21,14 @@ def as_test(channels, name="t"):
     return {"firmware": name, "route": "r", "analysis": {"channels": channels}}
 
 
-def test_candidate_period_stats():
-    rows = {r["period"]: r for r in diagnose.candidate_period_stats(np.array([511, 1023, 1535, 2047]), [256, 512, 1024], np)}
-    assert rows[512] == {"period": 512, "events": 4, "dominant_phase": 511, "dominant_count": 4, "concentration": 1.0, "enrichment": 512.0}
-    assert rows[256]["dominant_phase"] == 255 and rows[256]["concentration"] == 1.0
-    assert rows[1024]["dominant_count"] == 2 and rows[1024]["enrichment"] == 512.0
-    empty = diagnose.candidate_period_stats(np.array([], dtype=int), [512], np)[0]
-    assert empty["events"] == 0 and empty["dominant_phase"] is None and empty["enrichment"] == 0.0
-
-
 def test_step_discontinuities_report_phase_511():
     x, at = stepped(48000 * 10)
     ch = diagnose.analyze_channel(x, 48000, np)
     assert ch["jumps"]["gt_0.20"] == len(at)
-    r512 = next(r for r in ch["periodicity_gt_0_20"] if r["period"] == 512)
-    assert r512["dominant_phase"] == 511 and r512["concentration"] == 1.0
     assert all(t["mod_512"] == 511 for t in ch["top_jumps"][: len(at)])
-    assert set(ch["bands"]) == {"0_300", "300_3400", "3400_8000", "8000_16000", "16000_24000"}
-    assert sum(ch["bands"].values()) == pytest.approx(1.0, abs=1e-6)
-    assert diagnose.classify_test(as_test([ch])) == "periodic discontinuity signature"
+    b = ch["fold_best"]
+    assert b["phase"] % 512 == 511 and b["top12_at_phase"] == 12
+    assert diagnose.classify_test(as_test([ch])) == PERIODIC
 
 
 def test_broadband_noise_is_not_a_click_signature():
@@ -48,20 +38,21 @@ def test_broadband_noise_is_not_a_click_signature():
     assert diagnose.classify_test(as_test([ch])) == "no strong periodic-click signature"
 
 
-def test_16k_bands_skip_above_nyquist():
-    ch = diagnose.analyze_channel(np.zeros(16000), 16000, np)
-    assert set(ch["bands"]) == {"0_300", "300_3400", "3400_8000"}
-    assert ch["jumps"]["gt_0.05"] == 0 and ch["clipped_samples"] == 0
+def test_digital_silence_is_handled():
+    ch = diagnose.analyze_channel(np.zeros(16000 * 5), 16000, np)
+    assert ch["jumps"]["gt_0.05"] == 0 and ch["clipped_samples"] == 0 and ch["fold_best"]["ratio"] == 0.0
+    assert diagnose.classify_test(as_test([ch])) == CLEAN
 
 
-@pytest.mark.parametrize("count,enrichment,expected", [
-    (4, 20.0, "periodic discontinuity signature"),
-    (3, 500.0, "no strong periodic-click signature"),
-    (40, 19.9, "no strong periodic-click signature"),
+@pytest.mark.parametrize("z,ratio,sharpness,expected", [
+    (10.0, 1.25, 1.2, PERIODIC),
+    (9.9, 3.0, 3.0, CLEAN),
+    (40.0, 1.24, 3.0, CLEAN),
+    (40.0, 2.0, 1.19, CLEAN),
 ])
-def test_classification_thresholds(count, enrichment, expected):
-    ch = {"periodicity_gt_0_20": [{"period": 512, "dominant_count": count, "enrichment": enrichment}]}
-    assert diagnose.classify_test(as_test([{"periodicity_gt_0_20": []}, ch])) == expected
+def test_classification_thresholds(z, ratio, sharpness, expected):
+    b = {"period": 512, "phase": 0, "z": z, "ratio": ratio, "sharpness": sharpness, "top12_at_phase": 12}
+    assert diagnose.classify_test(as_test([{"fold_best": None}, {"fold_best": b}])) == expected
 
 
 def test_classification_without_channels():
@@ -149,7 +140,7 @@ def session(stim, tmp_path_factory, rt):
 
 def test_plots_are_png_data_uris(session):
     plots = session[0]["tests"][0]["plots"]
-    assert set(plots) == {"waveform", "jumps", "phase512", "spectrum", "spectrogram", "click_zoom"}
+    assert set(plots) == {"waveform", "jumps", "fold512", "spectrum", "spectrogram", "click_zoom"}
     assert all(v.startswith("data:image/png;base64,iVBOR") for v in plots.values())
 
 
@@ -171,8 +162,113 @@ def test_summary_csv_and_comment(session):
     rows = list(csv.DictReader(out.open(encoding="utf-8")))
     assert len(rows) == 1
     assert rows[0]["classification"] == "periodic discontinuity signature"
-    assert rows[0]["ch1_512_phase"] == "511"
+    assert rows[0]["ch1_periodicity"].startswith("P=") and ", sharp;" in rows[0]["ch1_periodicity"]
     comment = diagnose.generate_github_comment(sess)
     assert "| `<script>alert(1)</script>` | `normal` | periodic discontinuity signature |" in comment
     assert "modulo-512" in comment
     json.dumps({k: v for k, v in sess.items() if k != "tests"})
+
+
+# --- folded periodicity, upsampling signature, alignment robustness, buffer continuity ------
+
+def spliced(n_blocks=900, drop=0.12, seed=4, block=512):
+    """Band-limited noise with random whole blocks removed, like FFmpeg/AVFoundation at 48 kHz."""
+    rng = np.random.default_rng(seed)
+    b, a = __import__("scipy.signal", fromlist=["butter"]).butter(4, 0.05)
+    ref = __import__("scipy.signal", fromlist=["lfilter"]).lfilter(b, a, rng.normal(0, 0.5, n_blocks * block))
+    keep = rng.random(n_blocks) > drop
+    keep[:3] = True
+    test = np.concatenate([ref[k * block:(k + 1) * block] for k in range(n_blocks) if keep[k]])
+    return ref, test, keep
+
+
+def test_fold_finds_block_splices_at_the_right_period():
+    _, test, _ = spliced()
+    ch = diagnose.analyze_channel(test, 48000, np)
+    b = ch["fold_best"]
+    assert (b["period"], b["phase"]) == (512, 0) and b["sharpness"] > 1.5 and b["z"] > 10
+    assert diagnose.classify_test(as_test([ch])) == PERIODIC
+
+
+def test_broad_frame_modulation_is_not_a_click():
+    rng = np.random.default_rng(1)
+    n = 48000 * 30
+    env = 1 + 0.4 * np.exp(-0.5 * ((np.arange(n) % 960 - 480) / 60.0) ** 2)  # smooth 20 ms bump
+    ch = diagnose.analyze_channel(rng.normal(0, 0.05, n) * env, 48000, np)
+    b = ch["fold_best"]
+    assert b["period"] in (960, 1920) and b["z"] > 10 and b["sharpness"] < diagnose.FOLD_MIN_SHARPNESS
+    assert diagnose.classify_test(as_test([ch])) == CLEAN
+
+
+def test_fold_mask_excludes_samples():
+    x, at = stepped(48000 * 10)
+    mask = np.zeros(len(x), bool)
+    assert diagnose.folded_discontinuity(x, [512], np, mask) == []
+    mask[:] = True
+    assert diagnose.folded_discontinuity(x, [512], np, mask)[0]["phase"] == 511
+
+
+def test_periodic_stimulus_mask(stim):
+    _, manifest, data, fs = stim
+    mask = diagnose.periodic_stimulus_mask(len(data) + fs, fs, 0.5, manifest, np)
+    tone = next(s for s in manifest if s["name"] == "tone_1000Hz")
+    voice_like = next(s for s in manifest if s["name"] == "white_noise")
+    assert not mask[int((0.5 + (tone["start_s"] + tone["end_s"]) / 2) * fs)]
+    assert mask[int((0.5 + (voice_like["start_s"] + voice_like["end_s"]) / 2) * fs)]
+
+
+def test_upsampling_signature(rt):
+    rng = np.random.default_rng(2)
+    base = rt.sig.lfilter(*rt.sig.butter(6, 0.8), rng.normal(0, 0.1, 16000 * 10))  # < 6.4 kHz at 16 kHz
+    stuffed = np.zeros(len(base) * 3); stuffed[1::3] = base
+    filtered = rt.sig.resample_poly(base, 3, 1)
+    q = lambda x: np.round(x * 32768) / 32768
+    kinds = {name: diagnose.upsampling_signature(q(x), 48000, np, rt.sig)["kind"] for name, x in
+             (("stuffed", stuffed), ("filtered", filtered), ("wide", rng.normal(0, 0.1, 48000 * 10)))}
+    assert kinds["stuffed"].startswith("zero-stuffed") and kinds["filtered"].startswith("band-limited") and kinds["wide"] == "full-band"
+    assert diagnose.upsampling_signature(base, 16000, np, rt.sig) is None
+
+
+def test_alignment_survives_a_suppressed_chirp(stim, rt):
+    """Processed ASR output can nearly erase the chirp; the envelope stage still finds the start."""
+    _, manifest, data, fs = stim
+    sync = next(s for s in manifest if s["name"] == "sync_chirp")
+    offset = 0.884
+    rec = np.random.default_rng(3).normal(0, 1e-3, len(data) + 2 * fs)
+    a = int(offset * fs)
+    rec[a:a + len(data)] += 0.5 * data
+    c0, c1 = a + int(sync["start_s"] * fs), a + int(sync["end_s"] * fs)
+    rec[c0:c1] *= 0.001
+    rec[a + int(2.6 * fs):a + int(2.8 * fs)] += 0.3 * np.sin(np.arange(int(0.2 * fs)) / 3)  # a louder distractor later on
+    start, _ = diagnose.align_reference(rec, fs, data, fs, manifest, np, rt.sig)
+    assert start == pytest.approx(offset, abs=0.01)
+
+
+def write_pair(tmp_path, rt, ref, test, fs=48000):
+    r, t = tmp_path / "ref.wav", tmp_path / "test.wav"
+    rt.sf.write(str(r), np.column_stack([ref, 0.5 * ref]), fs, subtype="PCM_16")
+    rt.sf.write(str(t), np.column_stack([test, 0.5 * test]), fs, subtype="PCM_16")
+    return r, t
+
+
+def test_buffer_continuity_maps_every_dropped_block(tmp_path, rt):
+    ref, test, keep = spliced()
+    # the test capture also starts ~0.3 s (28 whole buffers) before the reference, like ffmpeg started first
+    lead = np.random.default_rng(9).normal(0, 0.2, 28 * 512)
+    r, t = write_pair(tmp_path, rt, ref, np.concatenate([lead, test]))
+    res = diagnose.buffer_continuity(r, t, rt.sf, np, rt.sig)
+    runs = sum(1 for k in range(1, len(keep)) if not keep[k] and keep[k - 1])
+    assert res["comparable"] and res["all_multiples_of_block"]
+    assert res["frames_missing"] == int((~keep).sum()) * 512 and res["splices"] == runs
+    assert res["splice_positions_mod_block"] == [0]
+
+
+def test_buffer_continuity_clean_and_incomparable(tmp_path, rt):
+    ref, _, _ = spliced(drop=0)
+    r, t = write_pair(tmp_path, rt, ref, ref[5 * 512:])
+    res = diagnose.buffer_continuity(r, t, rt.sf, np, rt.sig)
+    assert res["splices"] == 0 and res["bit_exact_blocks"] == res["blocks"]
+    r2, t2 = write_pair(tmp_path, rt, ref, np.random.default_rng(0).normal(0, 0.2, len(ref)))
+    assert diagnose.buffer_continuity(r2, t2, rt.sf, np, rt.sig)["comparable"] is False
+    rt.sf.write(str(t2), np.zeros((48000, 2)), 16000)
+    assert "format differs" in diagnose.buffer_continuity(r2, t2, rt.sf, np, rt.sig)["reason"]

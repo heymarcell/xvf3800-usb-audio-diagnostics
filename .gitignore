@@ -8,5 +8,6 @@ __pycache__/
 .venv/
 runs/
 ci-runs/
+validation/
 *.part
 .claude/settings.local.json
