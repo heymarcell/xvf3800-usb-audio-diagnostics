@@ -9,3 +9,4 @@ __pycache__/
 runs/
 ci-runs/
 *.part
+.claude/settings.local.json

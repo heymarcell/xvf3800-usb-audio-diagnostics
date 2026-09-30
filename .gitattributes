@@ -5,3 +5,5 @@
 *.jpg binary
 *.jpeg binary
 *.html linguist-detectable=false
+*.sh text eol=lf
+*.bat text eol=crlf

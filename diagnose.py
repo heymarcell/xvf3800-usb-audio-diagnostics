@@ -5,7 +5,7 @@ Flow:
   * bootstraps an isolated virtualenv and Python dependencies
   * downloads the official reSpeaker repository
   * locates/installs dfu-util where practical
-  * generates a deterministic technical acoustic stimulus + user-provided English VO
+  * generates a deterministic technical acoustic stimulus + the canonical English VO fixture
   * flashes v2.1.0 48k (deep mode), v2.1.1 48k, and v2.1.1 native 16k
   * configures documented XVF output checkpoints without saving configuration
   * plays stimulus through an independent output device while recording XVF input
@@ -42,11 +42,13 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Iterable
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 VOICE_PLAYBACK_GAIN_DB = -6.0
-REPO_ZIP_URL = "https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY/archive/refs/heads/master.zip"
+# Pinned so every run executes the same xvf_host.py and reads the same firmware tree.
+# Upstream changes the host script's CLI/output format; bump deliberately and re-verify.
+RESPEAKER_REPO_COMMIT = "4b49bfd19977c63cf6e90dfe9e5827e74e20bf6d"
+REPO_ZIP_URL = f"https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY/archive/{RESPEAKER_REPO_COMMIT}.zip"
 DFU_BINARIES_URL = "https://dfu-util.sourceforge.net/releases/dfu-util-0.11-binaries.tar.xz"
-DFU_WINDOWS_SNAPSHOT_URL = "https://dfu-util.sourceforge.net/snapshots/dfu-util_SNAPSHOT_20240416-win64.zip"
 XVF_VID_PID_DFU = "2886:001a"
 CACHE_DIR_NAME = ".xvfdiag-cache"
 VENV_DIR_NAME = ".xvfdiag-venv"
@@ -146,15 +148,21 @@ def bootstrap_venv(script_path: Path) -> None:
     if not py.exists():
         print("[bootstrap] Creating isolated Python environment...", flush=True)
         venv.EnvBuilder(with_pip=True, clear=False).create(vdir)
-    stamp = vdir / ".deps-v1"
-    if not stamp.exists():
+    stamp = vdir / ".deps"
+    wanted = "\n".join(PY_DEPS) + "\n"
+    if not stamp.exists() or stamp.read_text(encoding="utf-8") != wanted:
         print("[bootstrap] Installing diagnostic dependencies...", flush=True)
         run([str(py), "-m", "pip", "install", "--upgrade", "pip"], capture=False)
         run([str(py), "-m", "pip", "install", *PY_DEPS], capture=False)
-        stamp.write_text("ok\n", encoding="utf-8")
+        stamp.write_text(wanted, encoding="utf-8")
     env = os.environ.copy()
     env["XVFDIAG_VENV"] = str(vdir)
-    os.execve(str(py), [str(py), str(script_path), *sys.argv[1:]], env)
+    argv = [str(py), str(script_path), *sys.argv[1:]]
+    if os.name == "nt":
+        # os.exec* on Windows starts a new process and exits this one, which detaches
+        # the interactive DFU prompts from the console. Wait for the child instead.
+        raise SystemExit(subprocess.call(argv, env=env))
+    os.execve(str(py), argv, env)
 
 
 def _install_linux_portaudio() -> None:
@@ -205,17 +213,22 @@ def download(url: str, dest: Path) -> None:
 
 
 def ensure_repo(cache: Path) -> Path:
-    target = cache / "respeaker-repo"
+    short = RESPEAKER_REPO_COMMIT[:12]
+    target = cache / f"respeaker-repo-{short}"
     marker = target / "python_control" / "xvf_host.py"
     if marker.exists():
         return target
-    print("[setup] Downloading official reSpeaker repository...", flush=True)
-    archive = cache / "respeaker-master.zip"
+    print(f"[setup] Downloading official reSpeaker repository at {short}...", flush=True)
+    archive = cache / f"respeaker-{short}.zip"
     download(REPO_ZIP_URL, archive)
     unpack = cache / "repo-unpack"
     shutil.rmtree(unpack, ignore_errors=True)
     unpack.mkdir(parents=True)
     with zipfile.ZipFile(archive) as zf:
+        # GitHub stores the archived commit SHA as the zip comment.
+        commit = zf.comment.decode("ascii", "replace").strip()
+        if commit and commit != RESPEAKER_REPO_COMMIT:
+            raise RuntimeError(f"reSpeaker archive is commit {commit}, expected {RESPEAKER_REPO_COMMIT}")
         zf.extractall(unpack)
     roots = [p for p in unpack.iterdir() if p.is_dir()]
     if len(roots) != 1:
@@ -256,7 +269,10 @@ def ensure_dfu_util(cache: Path) -> str:
             shutil.rmtree(tools, ignore_errors=True)
             tools.mkdir(parents=True)
             with tarfile.open(archive, "r:xz") as tf:
-                tf.extractall(tools)
+                if hasattr(tarfile, "data_filter"):
+                    tf.extractall(tools, filter="data")
+                else:
+                    tf.extractall(tools)
             candidates = [p for p in tools.rglob("dfu-util.exe") if "win64" in str(p).lower()]
             exe = candidates[0] if candidates else next(tools.rglob("dfu-util.exe"), None)
         if not exe:
@@ -291,16 +307,29 @@ def ensure_dfu_util(cache: Path) -> str:
     raise RuntimeError("dfu-util is missing and no supported package manager was found.")
 
 
-def xvf_call(host_cmd: list[str], *args: str, check: bool = True) -> str:
-    proc = run([*host_cmd, *map(str, args)], check=check, capture=True, timeout=15)
+def xvf_call(host_cmd: list[str], command: str, *values: Any, check: bool = True) -> str:
+    # python_control/xvf_host.py reads with `COMMAND` and writes with `COMMAND --values V...`;
+    # positional values are rejected by its argparse.
+    cmd = [*host_cmd, command]
+    if values:
+        cmd += ["--values", *map(str, values)]
+    proc = run(cmd, check=check, capture=True, timeout=15)
     return (proc.stdout or "").strip()
 
 
+# python_control/xvf_host.py prints `VERSION: [2, 1, 1]`; compiled host_control prints `VERSION 2 1 1`.
+VERSION_RE = re.compile(r"^VERSION:?\s*\[?\s*\d+[,\s]+\d+[,\s]+\d+", re.MULTILINE)
+
+
 def parse_last_line_value(output: str, command: str) -> str:
+    """Return the `COMMAND: [values]` (or legacy `COMMAND values`) line from xvf_host output."""
     lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    cu = command.upper()
     for ln in reversed(lines):
-        if ln.upper().startswith(command.upper() + " ") or ln.upper() == command.upper():
+        head = ln.upper()
+        if head.startswith(cu + ":") or head.startswith(cu + " ") or head == cu:
             return ln
+    lines = [ln for ln in lines if ln != "Done!"]
     return lines[-1] if lines else ""
 
 
@@ -342,8 +371,10 @@ def wait_for_dfu(dfu: str, timeout_s: float = 120.0) -> str:
     deadline = time.monotonic() + timeout_s
     last = ""
     while time.monotonic() < deadline:
-        proc = run([dfu, "-l"], check=False, capture=True, timeout=10)
-        last = proc.stdout or ""
+        try:
+            last = run([dfu, "-l"], check=False, capture=True, timeout=10).stdout or ""
+        except subprocess.TimeoutExpired as exc:
+            last = f"dfu-util -l timed out: {exc}"
         if XVF_VID_PID_DFU.lower() in last.lower() and "alt=1" in last:
             return last
         time.sleep(1)
@@ -370,7 +401,7 @@ def wait_for_xvf(host_cmd: list[str], timeout_s: float = 60.0) -> str:
         try:
             out = xvf_call(host_cmd, "VERSION", check=False)
             last = out
-            if re.search(r"\bVERSION\s+\d+\s+\d+\s+\d+", out):
+            if VERSION_RE.search(out):
                 return out
         except Exception as exc:
             last = str(exc)
@@ -445,8 +476,13 @@ def load_voice(path: Path, target_fs: int, np: Any, sig: Any, sf: Any) -> Any:
 def voice_fixture_info(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
+    try:
+        # Keep shared evidence free of local absolute paths for the in-repo fixture.
+        shown = path.resolve().relative_to(Path(__file__).resolve().parent).as_posix()
+    except ValueError:
+        shown = str(path)
     return {
-        "path": str(path),
+        "path": shown,
         "filename": path.name,
         "sha256": sha256_file(path),
         "playback_gain_db": VOICE_PLAYBACK_GAIN_DB,
@@ -541,6 +577,38 @@ def list_audio_devices(sd: Any) -> list[dict[str, Any]]:
             "default_samplerate": d["default_samplerate"],
         })
     return rows
+
+
+def refresh_audio_devices(sd: Any) -> None:
+    # PortAudio snapshots the device list when it initializes. The XVF re-enumerates on
+    # USB after every flash (with a different rate on the 16 kHz image), so rescan.
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception as exc:
+        eprint(f"[audio] Could not refresh PortAudio device list: {exc}")
+
+
+def wait_for_audio_input(sd: Any, rate: int, timeout_s: float = 20.0) -> int:
+    # The audio interface can appear a little after the control interface answers.
+    deadline = time.monotonic() + timeout_s
+    while True:
+        refresh_audio_devices(sd)
+        try:
+            idx = find_input_device(sd)
+            sd.check_input_settings(device=idx, channels=2, dtype="float32", samplerate=rate)
+            return idx
+        except Exception as exc:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"XVF3800 audio input did not become available at {rate} Hz: {exc}") from exc
+        time.sleep(1)
+
+
+def find_output_by_name(sd: Any, name: str) -> int:
+    for i, d in enumerate(sd.query_devices()):
+        if d["name"] == name and d["max_output_channels"] > 0:
+            return i
+    raise RuntimeError(f"Playback device {name!r} is no longer available")
 
 
 def find_input_device(sd: Any) -> int:
@@ -876,7 +944,7 @@ def classify_test(test: dict[str, Any]) -> str:
     a = test["analysis"]
     if not a["channels"]:
         return "unknown"
-    # Primary evidence is right channel for normal ASR route, otherwise worst channel.
+    # A test is flagged when any channel shows the signature.
     periodic = False
     for ch in a["channels"]:
         rows = {r["period"]: r for r in ch["periodicity_gt_0_20"]}
@@ -1003,6 +1071,8 @@ def make_share_bundle(session_dir: Path, session: dict[str, Any], sf: Any) -> Pa
         sf.write(str(share / name), data, fs, format="FLAC", subtype="PCM_16")
     comment = generate_github_comment(session)
     (share / "github_comment.md").write_text(comment, encoding="utf-8")
+    # tools/import_run.py publishes the draft from the session root.
+    (session_dir / "github_comment.md").write_text(comment, encoding="utf-8")
     # Include exact runner and VO text.
     shutil.copy2(Path(__file__), share / "diagnose.py")
     (share / "VOICE_SCRIPT.txt").write_text(VOICE_SCRIPT + "\n", encoding="utf-8")
@@ -1057,8 +1127,20 @@ def environment_info(sd: Any, dfu: str, host_cmd: list[str], repo: Path) -> dict
     except Exception: dfu_ver="unknown"
     return {
         "app_version":APP_VERSION,"platform":platform.platform(),"system":platform.system(),"machine":platform.machine(),"python":sys.version,
-        "dfu_util":dfu_ver,"xvf_host":" ".join(host_cmd),"respeaker_repo":str(repo),"audio_devices":list_audio_devices(sd),
+        "dfu_util":dfu_ver,"xvf_host":" ".join(host_cmd),"respeaker_repo":str(repo),"respeaker_repo_commit":RESPEAKER_REPO_COMMIT,"audio_devices":list_audio_devices(sd),
     }
+
+
+def routes_for(fw_label: str, rate: int, deep: bool) -> list[dict[str, Any]]:
+    routes = ROUTES_48K if rate == 48000 else ROUTES_16K
+    if fw_label == "v2.1.0_48k2ch":
+        # Historical comparison: enough to reproduce its processed-output behavior.
+        routes = [ROUTES_48K[0]]
+    if not deep:
+        routes = [r for r in routes if r["name"] in {"normal", "raw", "pre_shf", "shf_input"}]
+        if rate == 16000:
+            routes = [r for r in routes if r["name"] == "normal"]
+    return routes
 
 
 def simulate_run(out_root: Path, voice: Path | None, np: Any, sig: Any, sf: Any) -> Path:
@@ -1075,9 +1157,12 @@ def simulate_run(out_root: Path, voice: Path | None, np: Any, sig: Any, sf: Any)
         delay=np.zeros(int(.75*rate)); y=np.concatenate([delay,base,delay])
         y=np.column_stack([y*.7,y*.65])
         if corrupt:
-            for i in range(511,len(y)-1,512*40):
-                y[i,1]=np.clip(y[i,1]+.42,-.98,.98)
-                y[i,0]=np.clip(y[i,0]-.32,-.98,.98)
+            # Click at every 40th 512-frame boundary: one sharp edge decaying over ~20 samples.
+            # Unlike a one-sample spike (two edges) it lands on exactly phase 511 mod 512.
+            impulses=np.zeros(len(y)); impulses[511:len(y)-1:512*40]=1.0
+            click=sig.lfilter([1.0],[1.0,-math.exp(-1/20)],impulses)
+            y[:,1]=np.clip(y[:,1]+.42*click,-.98,.98)
+            y[:,0]=np.clip(y[:,0]-.32*click,-.98,.98)
         p=sess/"recordings"/f"{fw}__{route}.wav"; sf.write(str(p),y,rate,subtype="PCM_16")
         a=analyze_recording(p,stim_path,manifest,sf,np,sig); plots=create_plots(p,a,sf,np)
         tests.append({"firmware":fw,"firmware_sha256":"simulation","route":route,"route_description":"synthetic validation","xvf_before":{},"capture_meta":{},"recording_path":str(p),"analysis":a,"plots":plots})
@@ -1117,14 +1202,18 @@ def real_run(args: argparse.Namespace, script_dir: Path, np: Any, sig: Any, sf: 
     input("\nPress ENTER to begin the firmware matrix... ")
 
     tests=[]
-    output_idx: int|None=None
+    output_name: str|None=None
     for fw_label,fw_path,rate,fwsha in fwrows:
         flash_firmware(dfu,fw_path,fw_label)
         wait_for_xvf(host_cmd)
-        input_idx=find_input_device(sd)
-        if output_idx is None:
+        input_idx=wait_for_audio_input(sd,rate)
+        if output_name is None:
             output_idx=choose_output_device(sd,args.output_device,input_idx)
-            print(f"[audio] Independent output: [{output_idx}] {sd.query_devices(output_idx)['name']}")
+            output_name=sd.query_devices(output_idx)["name"]
+            print(f"[audio] Independent output: [{output_idx}] {output_name}")
+        else:
+            # Indices can shift after the XVF re-enumerates; keep the same physical speaker.
+            output_idx=find_output_by_name(sd,output_name)
         print(f"[audio] XVF input: [{input_idx}] {sd.query_devices(input_idx)['name']}")
 
         # Exact no-playback control, close to the maintainer's 20 s ALSA capture reproduction.
@@ -1141,14 +1230,7 @@ def real_run(args: argparse.Namespace, script_dir: Path, np: Any, sig: Any, sf: 
         tests.append(amb_test)
         print(f"[capture] {classify_test(amb_test)}")
 
-        routes=ROUTES_48K if rate==48000 else ROUTES_16K
-        if fw_label=="v2.1.0_48k2ch":
-            # Historical comparison: enough to reproduce its processed-output behavior.
-            routes=[ROUTES_48K[0]]
-        if not args.deep:
-            routes=[r for r in routes if r["name"] in {"normal","raw","pre_shf","shf_input"}]
-            if rate==16000: routes=[r for r in routes if r["name"]=="normal"]
-        for route in routes:
+        for route in routes_for(fw_label,rate,args.deep):
             print(f"\n[capture] {fw_label} / {route['name']}: {route['description']}")
             set_route(host_cmd,route)
             before=snapshot_xvf(host_cmd)

@@ -40,13 +40,14 @@ The synthetic sections serve different purposes:
 - multitone: simultaneous-frequency behavior;
 - logarithmic sweep: transfer-function/spectral anomaly visibility;
 - transient train: response to short legitimate acoustic transients;
-- canonical natural-English VO: behavior on actual speech rather than laboratory signals. The committed source WAV is preserved byte-for-byte and inserted into the composite stimulus with a fixed -6 dB gain only; there is no loudness normalization, compression, EQ, or denoising.
+- canonical natural-English VO: behavior on actual speech rather than laboratory signals. The committed source WAV is preserved byte-for-byte and inserted into the composite stimulus with a fixed -6 dB gain and a 10 ms edge fade (so the insertion cannot itself create a discontinuity); there is no loudness normalization, compression, EQ, or denoising.
 
 ## Reproducibility
 
 The runner records:
 
 - OS/Python/audio-device inventory;
+- the pinned commit of the official reSpeaker repository that supplies the firmware images and `xvf_host.py`;
 - exact firmware SHA-256;
 - XVF configuration before and after every capture;
 - exact canonical VO SHA-256 and fixed playback gain;

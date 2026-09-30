@@ -11,6 +11,6 @@
 
 The original downloaded WAV is committed **without editing, trimming, normalization, EQ, denoising, or transcoding**. `provenance.json` records the source filename and generation metadata. `script.txt` contains the generation text including the ElevenLabs v4 delivery tags, and `voice-design-prompt.txt` records the Voice Design prompt.
 
-The diagnostic runner does not modify this file. When building the composite acoustic stimulus it reads this fixture and applies a deterministic fixed **-6 dB playback gain** to provide headroom while preserving the waveform's relative dynamics.
+The diagnostic runner does not modify this file. When building the composite acoustic stimulus it reads this fixture and applies a deterministic fixed **-6 dB playback gain** to provide headroom while preserving the waveform's relative dynamics, plus a 10 ms fade-in/fade-out at the segment edges.
 
 Do not replace this file after publishing diagnostic results. A future voice fixture should be added under a new versioned filename and referenced explicitly by the run metadata.

@@ -4,17 +4,38 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  smoke:
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.12']
+        include:
+          - os: ubuntu-latest
+            python-version: '3.10'
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
       - name: Install PortAudio runtime
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libportaudio2
       - name: Compile
         run: python -m py_compile diagnose.py tools/import_run.py
-      - name: Simulated end-to-end report
+      - name: Install test dependencies
+        run: python -c "import subprocess, sys, diagnose; subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pytest', *diagnose.PY_DEPS])"
+      - name: Test suite
+        run: python -m pytest tests -q
+      - name: Upstream pin checks (network)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        env:
+          XVFDIAG_NETWORK_TESTS: '1'
+        run: python -m pytest tests/test_upstream.py -q
+      - name: Simulated end-to-end report (bootstraps its own venv)
         run: python diagnose.py --simulate --no-open --output ci-runs
