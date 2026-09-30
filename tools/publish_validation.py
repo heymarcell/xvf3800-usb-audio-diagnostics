@@ -51,8 +51,26 @@ def pages_base() -> str | None:
 def sanitize(text: str, run_dir: Path) -> str:
     """Paths inside the run become run-relative, inside the checkout repo-relative, home dirs ~."""
     for root in (run_dir, REPO):
-        text = text.replace(f"{root}/", "").replace(str(root), ".")
-    return re.sub(r"/(?:Users|home)/[^/\s\"'`]+", "~", text)
+        for form in dict.fromkeys((str(root), root.as_posix())):
+            text = text.replace(form + "/", "").replace(form + "\\", "").replace(form, ".")
+    text = re.sub(r"/(?:Users|home)/[^/\s\"'`]+", "~", text)
+    return re.sub(r"[A-Za-z]:\\+Users\\+[^\\\s\"'`]+", "~", text)
+
+
+def relativize(value: Any, run_dir: Path) -> Any:
+    """Like sanitize, applied to every string of a JSON-like structure; paths become POSIX."""
+    if isinstance(value, dict):
+        return {k: relativize(v, run_dir) for k, v in value.items()}
+    if isinstance(value, list):
+        return [relativize(v, run_dir) for v in value]
+    if isinstance(value, str):
+        for root in (run_dir, REPO):
+            try:
+                return Path(value).relative_to(root).as_posix()
+            except ValueError:
+                pass
+        return sanitize(value, run_dir)
+    return value
 
 
 def title_of(results: dict[str, Any]) -> str:
@@ -97,7 +115,7 @@ def publish(run_dir: Path, dest_root: Path, with_matrix: bool) -> Path:
             html = html.replace(link.group(0), "")
     (dest / "report.html").write_text(sanitize(html, run_dir), encoding="utf-8")
     (dest / "SUMMARY.md").write_text(sanitize((run_dir / "SUMMARY.md").read_text(encoding="utf-8"), run_dir), encoding="utf-8")
-    (dest / "results.json").write_text(sanitize(json.dumps(results, indent=2), run_dir) + "\n", encoding="utf-8")
+    (dest / "results.json").write_text(json.dumps(relativize(results, run_dir), indent=2) + "\n", encoding="utf-8")
 
     trials = {t["name"]: t for t in results.get("stages", {}).get("hostpath", {}).get("trials", [])}
     figures = []

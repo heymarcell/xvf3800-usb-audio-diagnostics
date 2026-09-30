@@ -63,4 +63,11 @@ def test_publish_validation(tmp_path, rt):
     for f in json.loads((dest / "manifest.json").read_text(encoding="utf-8"))["files"]:
         assert hashlib.sha256((dest / f["path"]).read_bytes()).hexdigest() == f["sha256"]
     assert "validation-20260930-185836/README.md" in (tmp_path / "published" / "README.md").read_text(encoding="utf-8")
-    assert json.loads((dest / "results.json").read_text())["stages"]["hostpath"]["trials"][0]["dir"] == "hostpath/xvf48k_homebrew_ab1"
+    assert json.loads((dest / "results.json").read_text(encoding="utf-8"))["stages"]["hostpath"]["trials"][0]["dir"] == "hostpath/xvf48k_homebrew_ab1"
+
+
+def test_sanitize_windows_and_posix_paths(tmp_path):
+    pub = load("publish_validation")
+    run = tmp_path / "run"
+    assert pub.relativize({"a": [str(run / "hostpath" / "x")]}, run) == {"a": ["hostpath/x"]}
+    assert pub.sanitize(r"see C:\Users\alice\data and /Users/alice/x", run) == r"see ~\data and ~/x"
