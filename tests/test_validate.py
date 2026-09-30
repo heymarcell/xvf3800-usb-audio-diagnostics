@@ -94,7 +94,7 @@ def test_html_report_from_trials(tmp_path, rt):
                    "ffmpeg": {"classification": diagnose.PERIODIC}})
     trials.append({"name": "builtin_mic_homebrew_ab", "kind": "ab", "error": "ffmpeg produced no recording"})
     results = {"started": "x", "env": {}, "errors": [], "stages": {"hostpath": {"ok": True, "trials": trials, "playback_device": "Speakers"}}}
-    doc = rep.render(results, tmp_path).read_text()
+    doc = rep.render(results, tmp_path).read_text(encoding="utf-8")
     assert doc.count("<img") == 10  # 5 for the spliced trial, 4 for the clean one (no splice to zoom on), 1 duration chart
     assert "XVF3800 v2.1.1 48 kHz · Homebrew FFmpeg" in doc and "ffmpeg produced no recording" in doc
     assert "no audio missing in 1 trial(s)" in doc and "whole 512-frame buffers only" in doc
