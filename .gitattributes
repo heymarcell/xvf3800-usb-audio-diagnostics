@@ -1,0 +1,7 @@
+*.wav binary
+*.flac binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.html linguist-detectable=false

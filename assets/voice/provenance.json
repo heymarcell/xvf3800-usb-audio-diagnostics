@@ -1,0 +1,35 @@
+{
+  "canonical_file": "xvf3800-test-vo.wav",
+  "source_filename": "ElevenLabs_2026-09-30T05_41_37_Mara - Neutral Diagnostic Narrator_gen_sp100_s50_sb75_v4.wav",
+  "sha256": "2a94eeb70177de6c22db7a1253c5dacf41a7b6203d28dd5bf4027cbc6e61b15b",
+  "size_bytes": 6068456,
+  "audio": {
+    "container": "WAV",
+    "codec": "PCM signed 16-bit little-endian",
+    "sample_rate_hz": 48000,
+    "channels": 1,
+    "bits_per_sample": 16,
+    "duration_seconds": 63.04
+  },
+  "generator": "ElevenLabs",
+  "model": "eleven_v4",
+  "voice_name": "Mara - Neutral Diagnostic Narrator",
+  "voice_design": {
+    "language": "English",
+    "accent": "General American",
+    "gender": "Female",
+    "age_target": "30–40",
+    "prompt_file": "voice-design-prompt.txt"
+  },
+  "generation_settings": {
+    "speed": 1.0,
+    "stability": 0.50,
+    "similarity_boost": 0.75,
+    "basis": "Values encoded in the ElevenLabs download filename suffix gen_sp100_s50_sb75_v4"
+  },
+  "generated_at_from_filename": "2026-09-30T05:41:37",
+  "generated_at_timezone": "not encoded in the source filename",
+  "script_file": "script.txt",
+  "processing": "None. The canonical WAV is a byte-for-byte copy of the ElevenLabs download. The diagnostic runner applies a documented fixed playback gain when constructing the test stimulus.",
+  "purpose": "Immutable natural-English speech fixture for reproducible XVF3800 acoustic diagnostics"
+}

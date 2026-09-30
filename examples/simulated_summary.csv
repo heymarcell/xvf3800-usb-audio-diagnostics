@@ -1,0 +1,4 @@
+firmware,route,sample_rate,classification,ch0_jumps_gt_020,ch1_jumps_gt_020,ch0_512_phase,ch1_512_phase,ch0_512_concentration,ch1_512_concentration,alignment_score
+v2.1.1_48k2ch,normal,48000,periodic discontinuity signature,671,529,0,511,0.33084947839046197,0.41965973534971646,0.9996812124761771
+v2.1.1_48k2ch,raw,48000,no strong periodic-click signature,230,87,42,102,0.013043478260869565,0.022988505747126436,0.9999993633860907
+v2.1.1_native16k,normal,16000,no strong periodic-click signature,449,315,3,93,0.008908685968819599,0.012698412698412698,0.9999993560086211
